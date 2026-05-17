@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Items</title><link rel="stylesheet" href="/styles.css"></head>
+<body>
+<div class="container">
+  <a href="/home">Back</a>
+  <h2>Items</h2>
+  <form method="POST" action="/items">
+    <label>Name</label><input name="name" required>
+    <label>Type</label>
+    <select name="item_type"><option value="newspaper">Newspaper</option><option value="magazine">Magazine</option></select>
+    <label>Monthly Rate</label><input name="monthly_rate" type="number" value="295">
+    <button type="submit">Save Item</button>
+  </form>
+
+  <h3>Existing Items</h3>
+  <table>
+    <tr><th>Name</th><th>Type</th><th>Monthly</th></tr>
+    <% items.forEach(it => { %>
+      <tr><td><%= it.name %></td><td><%= it.item_type %></td><td>₹<%= it.monthly_rate %></td></tr>
+    <% }) %>
+  </table>
+</div>
+</body></html>

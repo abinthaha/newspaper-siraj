@@ -1,0 +1,20 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Customers</title><link rel="stylesheet" href="/styles.css"></head>
+<body>
+<div class="container">
+  <a href="/home">Back</a>
+  <h2>Customers</h2>
+  <table>
+    <tr><th>Name</th><th>Mobile</th><th>Area</th><th>Route</th><th>Action</th></tr>
+    <% customers.forEach(c=>{ %>
+      <tr>
+        <td><%= c.name %></td>
+        <td><%= c.mobile %></td>
+        <td><%= c.area_name || '' %></td>
+        <td><%= c.route_name || '' %></td>
+        <td><a href="/customer/view/<%= c.id %>">View</a> | <a href="/subscription/add/<%= c.id %>">Add subscription</a></td>
+      </tr>
+    <% }) %>
+  </table>
+</div>
+</body></html>

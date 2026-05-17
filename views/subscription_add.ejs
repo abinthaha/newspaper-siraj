@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Add Subscription</title><link rel="stylesheet" href="/styles.css"></head>
+<body>
+<div class="container">
+  <a href="/customer/view/<%= customer.id %>">Back</a>
+  <h2>Add Subscription for <%= customer.name %></h2>
+  <form method="POST" action="/subscription/add">
+    <input type="hidden" name="customer_id" value="<%= customer.id %>">
+    <label>Select Item</label>
+    <select name="item_id">
+      <% items.forEach(it => { %>
+        <option value="<%= it.id %>"><%= it.name %> - ₹<%= it.monthly_rate %> / month</option>
+      <% }) %>
+    </select>
+    <label>Monthly Rate (override)</label><input name="monthly_rate" type="number" placeholder="Leave blank to use item rate">
+    <label><input type="checkbox" name="is_annual" value="1"> Annual (prepaid) subscription - NO monthly billing</label>
+    <label><input type="checkbox" name="is_sunday_only" value="1"> Sunday-only (₹10 per Sunday)</label>
+    <label>Start date</label><input name="start_date" type="date">
+    <label>End date (optional)</label><input name="end_date" type="date">
+    <button type="submit">Add Subscription</button>
+  </form>
+</div>
+</body></html>

@@ -1,0 +1,12 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Billing</title><link rel="stylesheet" href="/styles.css"></head>
+<body>
+<div class="container">
+  <a href="/home">Back</a>
+  <h2>Generate Billing</h2>
+  <form method="POST" action="/billing/generate">
+    <label>Month (YYYY-MM)</label><input name="month" value="<%= month %>">
+    <button type="submit">Generate Billing</button>
+  </form>
+</div>
+</body></html>

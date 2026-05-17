@@ -1,0 +1,16 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Payment</title><link rel="stylesheet" href="/styles.css"></head>
+<body>
+<div class="container">
+  <a href="/payment/customer/<%= payment.customer_id %>">Back</a>
+  <h2>Payment - <%= payment.item_name %> - <%= payment.month %></h2>
+  <p>Due: ₹<%= payment.amount_due %></p>
+  <p>Paid so far: ₹<%= payment.amount_paid %></p>
+  <p>Balance: ₹<%= payment.balance %></p>
+
+  <form method="POST" action="/payment/pay/<%= payment.id %>">
+    <label>Amount to pay</label><input name="amount" type="number" step="0.01" required>
+    <button type="submit">Record Payment</button>
+  </form>
+</div>
+</body></html>

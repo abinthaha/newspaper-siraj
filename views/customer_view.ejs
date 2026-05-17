@@ -1,0 +1,39 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Customer</title><link rel="stylesheet" href="/styles.css"></head>
+<body>
+<div class="container">
+  <a href="/customers">Back</a>
+  <h2><%= customer.name %></h2>
+  <p>Mobile: <%= customer.mobile %></p>
+  <p>Area: <%= customer.area_name %> / Route: <%= customer.route_name %></p>
+
+  <h3>Subscriptions</h3>
+  <table>
+    <tr><th>Item</th><th>Monthly</th><th>Annual?</th><th>Sunday-only?</th><th>Period</th><th>Action</th></tr>
+    <% subscriptions.forEach(s=>{ %>
+      <tr>
+        <td><%= s.item_name %></td>
+        <td>₹<%= s.monthly_rate %></td>
+        <td><%= s.is_annual ? 'Yes' : 'No' %></td>
+        <td><%= s.is_sunday_only ? 'Yes' : 'No' %></td>
+        <td><%= s.start_date || '-' %> to <%= s.end_date || '-' %></td>
+        <td><a href="/payment/customer/<%= customer.id %>">Payments</a></td>
+      </tr>
+    <% }) %>
+  </table>
+
+  <h3>Recent Payments</h3>
+  <table>
+    <tr><th>Month</th><th>Item</th><th>Due</th><th>Paid</th><th>Balance</th></tr>
+    <% payments.forEach(p => { %>
+      <tr>
+        <td><%= p.month %></td>
+        <td><%= p.subscription_id %></td>
+        <td>₹<%= p.amount_due %></td>
+        <td>₹<%= p.amount_paid %></td>
+        <td>₹<%= p.balance %></td>
+      </tr>
+    <% }) %>
+  </table>
+</div>
+</body></html>

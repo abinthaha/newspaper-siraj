@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Add Customer</title><link rel="stylesheet" href="/styles.css"></head>
+<body>
+<div class="container">
+  <a href="/home">Back</a>
+  <h2>Add Customer</h2>
+  <form method="POST" action="/customer/add">
+    <label>Name</label><input name="name" required>
+    <label>Address</label><input name="address">
+    <label>Mobile</label><input name="mobile">
+    <label>Area</label><input name="area_name">
+    <label>Route</label><input name="route_name">
+    <button type="submit">Save</button>
+  </form>
+  <hr>
+  <h3>Quick Items (Existing)</h3>
+  <ul>
+    <% items.forEach(i => { %>
+      <li><%= i.item_type %> - <%= i.name %> : ₹<%= i.monthly_rate %></li>
+    <% }) %>
+  </ul>
+</div>
+</body></html>

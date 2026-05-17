@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Dashboard</title><link rel="stylesheet" href="/styles.css"></head>
+<body>
+<div class="container">
+  <h2>Dashboard</h2>
+  <div class="nav">
+    <a href="/customer/add">Add Customer</a> |
+    <a href="/customers">Customers</a> |
+    <a href="/items">Items</a> |
+    <a href="/subscriptions">Subscriptions</a> |
+    <a href="/billing/form">Billing</a> |
+    <a href="/reports">Reports</a> |
+    <a href="/settings">Settings</a> |
+    <a href="/logout">Logout</a>
+  </div>
+
+  <section>
+    <p>Total customers: <strong><%= stats.customers %></strong></p>
+    <p>Active subscriptions: <strong><%= stats.active_subscriptions %></strong></p>
+    <p>Pending this month: <strong>₹<%= stats.current_month_pending %></strong></p>
+  </section>
+</div>
+</body></html>
