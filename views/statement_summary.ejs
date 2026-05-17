@@ -1,16 +1,12 @@
 <% const monthList = (months || []).join(', '); %>
 <% const sorted = [...(months || [])].sort(); %>
-<% const exportFrom = sorted[0] || ''; %>
-<% const exportTo = sorted[sorted.length - 1] || ''; %>
-<% const singleMonth = months && months.length === 1 ? months[0] : null; %>
-<% const exportCust = (scope === 'customer' && customer && customer.id) ? customer.id : null; %>
 <!doctype html>
-<html><head><meta charset="utf-8"><title>Billing summary</title><link rel="stylesheet" href="/styles.css"></head>
+<html><head><meta charset="utf-8"><title>Statement</title><link rel="stylesheet" href="/styles.css"></head>
 <body>
 <%- include('_header') %>
 <div class="container container--billing-summary">
-  <a class="back-link" href="/billing/form">Back to billing</a>
-  <h2>Billing run</h2>
+  <a class="back-link" href="/billing/form#statement">Back to billing &amp; statements</a>
+  <h2>Statement</h2>
   <p class="billing-summary__meta">
     <strong><%= frequency.charAt(0).toUpperCase() + frequency.slice(1) %></strong>
     · Months: <strong><%= monthList %></strong>
@@ -23,48 +19,38 @@
     <% } %>
   </p>
   <p class="billing-summary__note">
-    Subscription-months processed (non-annual): <strong><%= subscriptionMonths %></strong>.
-    <strong>Month fee</strong> uses the <strong>item’s current catalog rate</strong> when the subscription is linked to an item (otherwise the rate stored on the subscription). Sunday-only and annual rules match <strong>Generate Billing</strong>. <strong>Invoice total</strong> still includes unpaid balance from earlier months. Re-run billing or open the dashboard to refresh amounts if they were generated with an old item rate.
+    Subscription-months listed: <strong><%= subscriptionMonths %></strong>
+    (active subscriptions overlapping each month, <strong>including annual</strong>).
+    <strong>Month fee</strong> follows the same rules as billing (catalog rate, Sunday-only, annual = no monthly charge).
+    Rows <strong>without</strong> a saved payment line show “—” for invoice / paid / balance unless the subscription is annual (shown as ₹0).
+    <strong>Invoice / collected / outstanding</strong> totals below count only rows that already have a payment record for that month.
   </p>
 
   <section class="billing-summary__totals billing-summary__totals--four" aria-label="Totals">
     <div class="reports-kpi__card">
       <span class="reports-kpi__value">₹<%= Number(totals.periodCharge || 0).toLocaleString(undefined, { maximumFractionDigits: 0 }) %></span>
-      <span class="reports-kpi__label">Month fees (subscription charges)</span>
+      <span class="reports-kpi__label">Month fees (all rows)</span>
     </div>
     <div class="reports-kpi__card">
       <span class="reports-kpi__value">₹<%= Number(totals.amountDue || 0).toLocaleString(undefined, { maximumFractionDigits: 0 }) %></span>
-      <span class="reports-kpi__label">Invoice totals (with balance forward)</span>
+      <span class="reports-kpi__label">Invoice totals (payment rows only)</span>
     </div>
     <div class="reports-kpi__card">
       <span class="reports-kpi__value">₹<%= Number(totals.amountPaid || 0).toLocaleString(undefined, { maximumFractionDigits: 0 }) %></span>
-      <span class="reports-kpi__label">Total collected (rows shown)</span>
+      <span class="reports-kpi__label">Total collected (payment rows only)</span>
     </div>
     <div class="reports-kpi__card reports-kpi__card--accent">
       <span class="reports-kpi__value">₹<%= Number(totals.balance || 0).toLocaleString(undefined, { maximumFractionDigits: 0 }) %></span>
-      <span class="reports-kpi__label">Total outstanding (rows shown)</span>
+      <span class="reports-kpi__label">Total outstanding (payment rows only)</span>
     </div>
   </section>
 
-  <div class="billing-summary__export">
-    <span class="billing-summary__export-label">Download this bill data:</span>
-    <% if (singleMonth) { %>
-      <a href="/export/payments?month=<%= encodeURIComponent(singleMonth) %>&amp;format=csv<% if (exportCust != null) { %>&amp;customer_id=<%= exportCust %><% } %>">CSV</a>
-      <span class="billing-summary__dot">·</span>
-      <a href="/export/payments?month=<%= encodeURIComponent(singleMonth) %>&amp;format=xlsx<% if (exportCust != null) { %>&amp;customer_id=<%= exportCust %><% } %>">XLSX</a>
-    <% } else if (exportFrom && exportTo) { %>
-      <a href="/export/payments?from=<%= encodeURIComponent(exportFrom) %>&amp;to=<%= encodeURIComponent(exportTo) %>&amp;format=csv<% if (exportCust != null) { %>&amp;customer_id=<%= exportCust %><% } %>">CSV</a>
-      <span class="billing-summary__dot">·</span>
-      <a href="/export/payments?from=<%= encodeURIComponent(exportFrom) %>&amp;to=<%= encodeURIComponent(exportTo) %>&amp;format=xlsx<% if (exportCust != null) { %>&amp;customer_id=<%= exportCust %><% } %>">XLSX</a>
-    <% } %>
-  </div>
-
-  <h3 class="billing-summary__table-title">Payment lines</h3>
+  <h3 class="billing-summary__table-title">Subscription lines</h3>
   <% if (!rows || !rows.length) { %>
     <% if (typeof pagination !== 'undefined' && pagination && pagination.total > 0) { %>
       <p class="billing-summary__empty">No lines on this page. <a href="<%= pagination.firstUrl %>">Go to first page</a></p>
     <% } else { %>
-    <p class="billing-summary__empty">No payment rows matched this run (e.g. no overlapping subscriptions for these months).</p>
+    <p class="billing-summary__empty">No subscriptions overlapped these months for the selected scope.</p>
     <% } %>
   <% } else { %>
     <div class="table-wrap">
@@ -75,6 +61,7 @@
             <th>Customer</th>
             <th>Mobile</th>
             <th>Subscription</th>
+            <th>Type</th>
             <th>Month fee</th>
             <th>From prior</th>
             <th>Invoice total</th>
@@ -85,7 +72,8 @@
         </thead>
         <tbody>
           <% rows.forEach(function (r) { %>
-            <% const bal = Number(r.balance || 0); const paid = Number(r.amount_paid || 0); %>
+            <% const hasPay = r.id != null && r.id !== ''; %>
+            <% const isAnnual = Number(r.subscription_is_annual) === 1; %>
             <% const pcRaw = r.period_charge; %>
             <% const pc = pcRaw == null || pcRaw === '' ? NaN : Number(pcRaw); %>
             <tr>
@@ -93,12 +81,51 @@
               <td><%= r.customer_name %></td>
               <td><%= r.customer_mobile || '—' %></td>
               <td><%= r.item_name || '—' %></td>
+              <td>
+                <% if (isAnnual) { %>
+                  <span class="badge badge--success">Annual</span>
+                <% } else if (Number(r.subscription_is_sunday_only) === 1) { %>
+                  <span class="badge badge--neutral">Sunday</span>
+                <% } else { %>
+                  <span class="badge badge--info">Monthly</span>
+                <% } %>
+              </td>
               <td><%= Number.isFinite(pc) ? '₹' + pc.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '—' %></td>
               <td><%= r.prior_closing_balance != null ? '₹' + Number(r.prior_closing_balance).toLocaleString(undefined, { maximumFractionDigits: 0 }) : '—' %></td>
-              <td>₹<%= Number(r.amount_due || 0).toLocaleString(undefined, { maximumFractionDigits: 0 }) %></td>
-              <td>₹<%= Number(r.amount_paid || 0).toLocaleString(undefined, { maximumFractionDigits: 0 }) %></td>
-              <td>₹<%= Number(r.balance || 0).toLocaleString(undefined, { maximumFractionDigits: 0 }) %></td>
-              <td><a href="/payment/<%= r.id %>">Open</a></td>
+              <td>
+                <% if (hasPay) { %>
+                  ₹<%= Number(r.amount_due || 0).toLocaleString(undefined, { maximumFractionDigits: 0 }) %>
+                <% } else if (isAnnual) { %>
+                  ₹0
+                <% } else { %>
+                  —
+                <% } %>
+              </td>
+              <td>
+                <% if (hasPay) { %>
+                  ₹<%= Number(r.amount_paid || 0).toLocaleString(undefined, { maximumFractionDigits: 0 }) %>
+                <% } else if (isAnnual) { %>
+                  ₹0
+                <% } else { %>
+                  —
+                <% } %>
+              </td>
+              <td>
+                <% if (hasPay) { %>
+                  ₹<%= Number(r.balance || 0).toLocaleString(undefined, { maximumFractionDigits: 0 }) %>
+                <% } else if (isAnnual) { %>
+                  ₹0
+                <% } else { %>
+                  —
+                <% } %>
+              </td>
+              <td>
+                <% if (hasPay) { %>
+                  <a href="/payment/<%= r.id %>">Open</a>
+                <% } else { %>
+                  —
+                <% } %>
+              </td>
             </tr>
           <% }); %>
         </tbody>
@@ -109,6 +136,8 @@
 
   <p class="billing-summary__footer">
     <a href="/home">Dashboard</a>
+    <span class="billing-summary__dot">·</span>
+    <a href="/billing/form#statement">Billing &amp; statements</a>
     <span class="billing-summary__dot">·</span>
     <a href="/reports">Reports</a>
   </p>

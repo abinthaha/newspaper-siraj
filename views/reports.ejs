@@ -4,8 +4,23 @@
 <%- include('_header') %>
 <div class="container container--reports">
   <a class="back-link" href="/home">Back</a>
-  <h2>Reports</h2>
-  <p class="reports-lead">Payment trends, balances by product, and exports for accounting.</p>
+  <div class="reports-head">
+    <div class="reports-head__text">
+      <h2>Reports</h2>
+      <p class="reports-lead">Payment trends, balances by product, and exports for accounting.</p>
+    </div>
+    <form class="reports-tenure-form" method="get" action="/reports">
+      <label class="reports-tenure-form__label" for="reports-tenure">Tenure</label>
+      <select id="reports-tenure" name="tenure" class="reports-tenure-form__select" onchange="this.form.submit()">
+        <% const t = typeof tenure !== 'undefined' ? tenure : 'last_year'; %>
+        <option value="current"<%= t === 'current' ? ' selected' : '' %>>Current month</option>
+        <option value="last_month"<%= t === 'last_month' ? ' selected' : '' %>>Last month</option>
+        <option value="last_3"<%= t === 'last_3' ? ' selected' : '' %>>Last 3 months</option>
+        <option value="last_6"<%= t === 'last_6' ? ' selected' : '' %>>Last 6 months</option>
+        <option value="last_year"<%= t === 'last_year' ? ' selected' : '' %>>Last 12 months</option>
+      </select>
+    </form>
+  </div>
 
   <section class="reports-kpi" aria-label="Summary figures">
     <div class="reports-kpi__card">
@@ -17,19 +32,19 @@
       <span class="reports-kpi__label">Active subscriptions</span>
     </div>
     <div class="reports-kpi__card">
-      <span class="reports-kpi__value">₹<%= kpi.monthPaid %></span>
-      <span class="reports-kpi__label">Collected (<%= currentMonth %>)</span>
+      <span class="reports-kpi__value">₹<%= Number(kpi.monthPaid || 0).toLocaleString(undefined, { maximumFractionDigits: 0 }) %></span>
+      <span class="reports-kpi__label">Collected (<%= typeof kpiCollectedLabel !== 'undefined' ? kpiCollectedLabel : currentMonth %>)</span>
     </div>
     <div class="reports-kpi__card reports-kpi__card--accent">
-      <span class="reports-kpi__value">₹<%= kpi.monthBalance %></span>
-      <span class="reports-kpi__label">Outstanding (<%= currentMonth %>)</span>
+      <span class="reports-kpi__value">₹<%= Number(kpi.monthBalance || 0).toLocaleString(undefined, { maximumFractionDigits: 0 }) %></span>
+      <span class="reports-kpi__label">Outstanding (as of <%= typeof kpiOutstandingLabel !== 'undefined' ? kpiOutstandingLabel : currentMonth %>)</span>
     </div>
   </section>
 
   <div class="reports-charts">
     <section class="reports-chart-card reports-chart-card--wide">
       <h3 class="reports-chart-card__title">Collected vs outstanding by month</h3>
-      <p class="reports-chart-card__sub">Last 12 calendar months (stacked).</p>
+      <p class="reports-chart-card__sub"><%= typeof trendSub !== 'undefined' ? trendSub : 'By month (stacked).' %></p>
       <div class="reports-chart-canvas-wrap">
         <canvas id="chartTrend" aria-label="Stacked bar chart of payments by month"></canvas>
       </div>
@@ -38,7 +53,7 @@
     <div class="reports-chart-row">
       <section class="reports-chart-card">
         <h3 class="reports-chart-card__title">Outstanding by product</h3>
-        <p class="reports-chart-card__sub">Current month: <%= currentMonth %></p>
+        <p class="reports-chart-card__sub">Month <%= typeof rangeEnd !== 'undefined' ? rangeEnd : currentMonth %> (by item)</p>
         <p class="reports-chart__empty" id="chartByItemEmpty" hidden>No outstanding balance this month.</p>
         <div class="reports-chart-canvas-wrap reports-chart-canvas-wrap--compact">
           <canvas id="chartByItem" aria-label="Doughnut chart of balance by product"></canvas>
@@ -46,7 +61,7 @@
       </section>
       <section class="reports-chart-card">
         <h3 class="reports-chart-card__title">Top customers by balance owed</h3>
-        <p class="reports-chart-card__sub">All months, customers with balance &gt; 0.</p>
+        <p class="reports-chart-card__sub">Snapshot at <%= typeof rangeEnd !== 'undefined' ? rangeEnd : currentMonth %>, customers with balance &gt; 0.</p>
         <p class="reports-chart__empty" id="chartDebtorsEmpty" hidden>No balances owed.</p>
         <div class="reports-chart-canvas-wrap reports-chart-canvas-wrap--compact">
           <canvas id="chartDebtors" aria-label="Horizontal bar chart of top debtors"></canvas>
@@ -74,7 +89,7 @@
         <label class="reports-export__label" for="export-from">From</label>
         <input type="month" id="export-from" class="reports-export__input" value="<%= exportOldest %>">
         <label class="reports-export__label" for="export-to">To</label>
-        <input type="month" id="export-to" class="reports-export__input" value="<%= currentMonth %>">
+        <input type="month" id="export-to" class="reports-export__input" value="<%= typeof exportTo !== 'undefined' ? exportTo : currentMonth %>">
         <div class="reports-export__actions">
           <button type="button" class="reports-export__btn" id="btn-csv-range">Download CSV</button>
           <button type="button" class="reports-export__btn reports-export__btn--primary" id="btn-xlsx-range">Download XLSX</button>
@@ -85,8 +100,8 @@
         <ul class="reports-export__links">
           <li><a href="/export/payments?month=<%= currentMonth %>&amp;format=csv">CSV — <%= currentMonth %></a></li>
           <li><a href="/export/payments?month=<%= currentMonth %>&amp;format=xlsx">XLSX — <%= currentMonth %></a></li>
-          <li><a href="/export/payments?from=<%= exportOldest %>&amp;to=<%= currentMonth %>&amp;format=csv">CSV — last 12 months</a></li>
-          <li><a href="/export/payments?from=<%= exportOldest %>&amp;to=<%= currentMonth %>&amp;format=xlsx">XLSX — last 12 months</a></li>
+          <li><a href="/export/payments?from=<%= exportOldest %>&amp;to=<%= typeof exportTo !== 'undefined' ? exportTo : currentMonth %>&amp;format=csv">CSV — selected period</a></li>
+          <li><a href="/export/payments?from=<%= exportOldest %>&amp;to=<%= typeof exportTo !== 'undefined' ? exportTo : currentMonth %>&amp;format=xlsx">XLSX — selected period</a></li>
         </ul>
       </div>
     </div>

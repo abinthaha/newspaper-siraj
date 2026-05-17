@@ -6,7 +6,7 @@
   <a class="back-link" href="/home">Back</a>
   <h2>Subscriptions</h2>
   <div class="table-wrap">
-    <table class="data-table">
+    <table class="data-table subscription-list__table">
       <thead>
         <tr>
           <th>Customer</th>
@@ -15,10 +15,15 @@
           <th>Annual</th>
           <th>Sunday-only</th>
           <th>Status</th>
+          <th>Action</th>
         </tr>
       </thead>
       <tbody>
+        <% const pg = typeof pagination !== 'undefined' && pagination ? pagination : null; %>
+        <% const retPage = pg && pg.page != null ? pg.page : 1; %>
+        <% const retPer = pg && pg.perPage != null ? pg.perPage : 10; %>
         <% subscriptions.forEach(s => { %>
+          <% const isActive = Number(s.active) !== 0; %>
           <tr>
             <td><%= s.customer_name %></td>
             <td><%= s.item_name %></td>
@@ -30,12 +35,21 @@
               <% if (s.is_sunday_only) { %><span class="badge badge--warning">Yes</span><% } else { %><span class="badge badge--neutral">No</span><% } %>
             </td>
             <td>
-              <% if (Number(s.active) === 0) { %><span class="badge badge--danger">Stopped</span><% } else { %><span class="badge badge--success">Active</span><% } %>
+              <% if (isActive) { %><span class="badge badge--success">Active</span><% } else { %><span class="badge badge--danger">Inactive</span><% } %>
+            </td>
+            <td class="subscription-list__actions">
+              <form method="post" action="/subscription/set-active/<%= s.id %>" class="subscription-list__status-form"<% if (isActive) { %> onsubmit="return confirm('Set this subscription to inactive? It will be skipped for billing until you activate it again.');"<% } %>>
+                <input type="hidden" name="active" value="<%= isActive ? '0' : '1' %>">
+                <input type="hidden" name="return_page" value="<%= retPage %>">
+                <input type="hidden" name="return_per_page" value="<%= retPer %>">
+                <button type="submit" class="subscription-list__status-btn"><%= isActive ? 'Set inactive' : 'Activate' %></button>
+              </form>
             </td>
           </tr>
         <% }) %>
       </tbody>
     </table>
   </div>
+  <%- include('_pagination', { pagination: typeof pagination !== 'undefined' ? pagination : null }) %>
 </div>
 </body></html>

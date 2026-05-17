@@ -69,15 +69,6 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M10 8l4 4-4 4"/></svg>
       </span>
     </a>
-    <a class="home-card home-card--muted" href="/logout">
-      <span class="home-card__icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-      </span>
-      <span class="home-card__label">Logout</span>
-      <span class="home-card__arrow" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M10 8l4 4-4 4"/></svg>
-      </span>
-    </a>
   </nav>
 
   <section class="home-stats">
@@ -116,6 +107,14 @@
             <tbody id="pending-modal-tbody"></tbody>
           </table>
         </div>
+        <div id="pending-modal-pagination" class="table-pagination table-pagination--modal" hidden>
+          <p id="pending-modal-page-summary" class="table-pagination__summary"></p>
+          <div class="table-pagination__nav">
+            <button type="button" class="table-pagination__link" id="pending-page-prev">Previous</button>
+            <span id="pending-modal-page-meta" class="table-pagination__pages"></span>
+            <button type="button" class="table-pagination__link" id="pending-page-next">Next</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -132,6 +131,14 @@
   var tbody = document.getElementById('pending-modal-tbody');
   var monthLabel = document.getElementById('pending-modal-month-label');
   var lastFocus = null;
+  var pendingPage = 1;
+  var pendingRowsAll = [];
+  var PENDING_PAGE_SIZE = 10;
+  var pagWrap = document.getElementById('pending-modal-pagination');
+  var pagSummary = document.getElementById('pending-modal-page-summary');
+  var pagMeta = document.getElementById('pending-modal-page-meta');
+  var btnPrev = document.getElementById('pending-page-prev');
+  var btnNext = document.getElementById('pending-page-next');
 
   function esc(s) {
     var d = document.createElement('div');
@@ -154,7 +161,10 @@
     loading.hidden = false;
     empty.hidden = true;
     wrap.hidden = true;
+    if (pagWrap) pagWrap.hidden = true;
     tbody.innerHTML = '';
+    pendingRowsAll = [];
+    pendingPage = 1;
 
     var closeBtn = modal.querySelector('.modal__close');
     requestAnimationFrame(function () {
@@ -173,25 +183,66 @@
           empty.hidden = false;
           return;
         }
-        wrap.hidden = false;
-        tbody.innerHTML = rows.map(function (row) {
-          var pid = parseInt(row.payment_id, 10);
-          if (!isFinite(pid)) pid = 0;
-          return '<tr>' +
-            '<td>' + esc(row.customer_name) + '</td>' +
-            '<td>' + esc(row.customer_mobile) + '</td>' +
-            '<td>' + esc(row.subscription_name) + '</td>' +
-            '<td>₹' + esc(row.balance) + '</td>' +
-            '<td><a href="/payment/' + pid + '">View</a></td>' +
-            '</tr>';
-        }).join('');
+        pendingRowsAll = rows;
+        pendingPage = 1;
+        renderPendingPage();
       })
       .catch(function () {
         loading.textContent = 'Could not load details. Try again.';
       });
   }
 
+  function renderPendingPage() {
+    var total = pendingRowsAll.length;
+    if (!total) return;
+    var totalPages = Math.max(1, Math.ceil(total / PENDING_PAGE_SIZE));
+    if (pendingPage > totalPages) pendingPage = totalPages;
+    if (pendingPage < 1) pendingPage = 1;
+    var start = (pendingPage - 1) * PENDING_PAGE_SIZE;
+    var slice = pendingRowsAll.slice(start, start + PENDING_PAGE_SIZE);
+    wrap.hidden = false;
+    tbody.innerHTML = slice.map(function (row) {
+      var pid = parseInt(row.payment_id, 10);
+      if (!isFinite(pid)) pid = 0;
+      return '<tr>' +
+        '<td>' + esc(row.customer_name) + '</td>' +
+        '<td>' + esc(row.customer_mobile) + '</td>' +
+        '<td>' + esc(row.subscription_name) + '</td>' +
+        '<td>₹' + esc(row.balance) + '</td>' +
+        '<td><a href="/payment/' + pid + '">View</a></td>' +
+        '</tr>';
+    }).join('');
+    if (pagWrap && pagSummary && pagMeta && btnPrev && btnNext) {
+      if (totalPages <= 1) {
+        pagWrap.hidden = true;
+      } else {
+        pagWrap.hidden = false;
+        pagSummary.textContent = 'Showing ' + (start + 1) + '–' + Math.min(start + PENDING_PAGE_SIZE, total) + ' of ' + total;
+        pagMeta.textContent = 'Page ' + pendingPage + ' of ' + totalPages;
+        btnPrev.disabled = pendingPage <= 1;
+        btnNext.disabled = pendingPage >= totalPages;
+        pagMeta.style.display = '';
+        btnPrev.style.display = '';
+        btnNext.style.display = '';
+      }
+    }
+  }
+
   tile.addEventListener('click', openModal);
+
+  if (btnPrev) btnPrev.addEventListener('click', function () {
+    if (pendingPage > 1) {
+      pendingPage--;
+      renderPendingPage();
+    }
+  });
+  if (btnNext) btnNext.addEventListener('click', function () {
+    var totalPages = Math.max(1, Math.ceil(pendingRowsAll.length / PENDING_PAGE_SIZE));
+    if (pendingPage < totalPages) {
+      pendingPage++;
+      renderPendingPage();
+    }
+  });
 
   modal.querySelectorAll('[data-close-modal]').forEach(function (el) {
     el.addEventListener('click', closeModal);

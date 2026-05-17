@@ -1,3 +1,4 @@
+<% const rows = locals.subscriptionSummaries || []; %>
 <!doctype html>
 <html><head><meta charset="utf-8"><title>Payments</title><link rel="stylesheet" href="/styles.css"></head>
 <body>
@@ -5,42 +6,52 @@
 <div class="container">
   <a class="back-link" href="/customer/view/<%= customer.id %>">Back</a>
   <h2>Payments for <%= customer.name %></h2>
+  <p class="customer-view__hint">One row per subscription. <strong>Open</strong> uses the latest billing month for that paper so you can record a payment. For every month’s lines, open the customer page and use <strong>Statements</strong>.</p>
   <div class="table-wrap">
     <table class="data-table">
       <thead>
         <tr>
-          <th>Month</th>
-          <th>Item</th>
-          <th>Due</th>
-          <th>Paid</th>
-          <th>Balance</th>
+          <th>Subscription</th>
           <th>Status</th>
+          <th>Latest bill month</th>
+          <th>Balance</th>
           <th>Action</th>
         </tr>
       </thead>
       <tbody>
-        <% payments.forEach(p => { %>
-          <% const bal = Number(p.balance || 0); const paid = Number(p.amount_paid || 0); %>
+        <% if (!rows.length) { %>
           <tr>
-            <td><%= p.month %></td>
-            <td><%= p.item_name %></td>
-            <td>₹<%= p.amount_due %></td>
-            <td>₹<%= p.amount_paid %></td>
-            <td>₹<%= p.balance %></td>
-            <td>
-              <% if (bal <= 0) { %>
-                <span class="badge badge--success">Paid</span>
-              <% } else if (paid > 0) { %>
-                <span class="badge badge--warning">Partial</span>
-              <% } else { %>
-                <span class="badge badge--danger">Due</span>
-              <% } %>
-            </td>
-            <td><a href="/payment/<%= p.id %>">Open</a></td>
+            <td colspan="5" class="customer-list__empty">No subscriptions for this customer yet.</td>
           </tr>
-        <% }) %>
+        <% } else { %>
+          <% rows.forEach(function (r) { %>
+            <% const bal = Number(r.balance || 0); const active = Number(r.active) !== 0; %>
+            <tr>
+              <td><%= r.item_name %></td>
+              <td>
+                <% if (!active) { %>
+                  <span class="badge badge--danger">Stopped</span>
+                <% } else if (bal <= 0) { %>
+                  <span class="badge badge--success">Clear</span>
+                <% } else { %>
+                  <span class="badge badge--danger">Due</span>
+                <% } %>
+              </td>
+              <td><%= r.latest_month || '—' %></td>
+              <td>₹<%= r.balance != null ? r.balance : 0 %></td>
+              <td>
+                <% if (r.latest_payment_id) { %>
+                  <a href="/payment/<%= r.latest_payment_id %>">Open</a>
+                <% } else { %>
+                  —
+                <% } %>
+              </td>
+            </tr>
+          <% }); %>
+        <% } %>
       </tbody>
     </table>
   </div>
+  <%- include('_pagination', { pagination: typeof pagination !== 'undefined' ? pagination : null }) %>
 </div>
 </body></html>

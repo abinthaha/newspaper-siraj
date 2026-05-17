@@ -8,7 +8,10 @@
   <p>Mobile: <%= customer.mobile %></p>
   <p>Area: <%= customer.area_name %> / Route: <%= customer.route_name %></p>
 
-  <h3>Subscriptions</h3>
+  <div class="customer-view__subscriptions-header">
+    <h3>Subscriptions</h3>
+    <a class="customer-view__payments-btn" href="/payment/customer/<%= customer.id %>">Payments</a>
+  </div>
   <div class="table-wrap">
     <table class="data-table">
       <thead>
@@ -38,13 +41,14 @@
               <% if (Number(s.active) === 0) { %><span class="badge badge--danger">Stopped</span><% } else { %><span class="badge badge--success">Active</span><% } %>
             </td>
             <td class="customer-view__sub-actions">
-              <a href="/payment/customer/<%= customer.id %>">Payments</a>
               <% if (Number(s.active) !== 0) { %>
               <a href="/subscription/edit/<%= s.id %>">Edit</a>
               <form method="post" action="/subscription/stop/<%= s.id %>" class="customer-view__stop-form" onsubmit="return confirm('Remove this subscription? It will be marked stopped as of today. Past payments stay on record.');">
                 <input type="hidden" name="customer_id" value="<%= customer.id %>">
                 <button type="submit" class="customer-view__remove-btn">Remove</button>
               </form>
+              <% } else { %>
+              —
               <% } %>
             </td>
           </tr>
@@ -52,27 +56,37 @@
       </tbody>
     </table>
   </div>
+  <%- include('_pagination', { pagination: typeof paginationSubs !== 'undefined' ? paginationSubs : null }) %>
 
-  <h3>Recent Payments</h3>
-  <p class="customer-view__hint">Billing lines are created automatically for each month from the subscription start through today (same amounts as <strong>Generate Billing</strong>). Use that page if you need to regenerate or change a period.</p>
+  <h3>Statements</h3>
+  <p class="customer-view__hint"><strong>Month fee</strong> is this month’s subscription charge (same basis as <strong>Generate Billing</strong>: catalog rate on the item, or the rate saved on the subscription). <strong>Running total</strong> includes any unpaid balance carried forward from earlier months. Use Generate Billing if you need to refresh lines after changing rates.</p>
+  <p class="customer-view__total-due"><span>Total due</span><strong>₹<%= (typeof totalDue !== 'undefined' ? totalDue : 0).toLocaleString('en-IN', { maximumFractionDigits: 2 }) %></strong></p>
   <div class="table-wrap">
     <table class="data-table">
       <thead>
         <tr>
           <th>Month</th>
           <th>Subscription</th>
-          <th>Due</th>
+          <th>Month fee</th>
+          <th>Running total</th>
           <th>Paid</th>
           <th>Balance</th>
           <th>Status</th>
         </tr>
       </thead>
       <tbody>
-        <% payments.forEach(p => { %>
+        <% const statements = locals.statements || []; %>
+        <% if (!statements.length) { %>
+          <tr>
+            <td colspan="7" class="customer-list__empty">No billing lines yet. Run <strong>Generate Billing</strong> from the home page if this customer should have charges.</td>
+          </tr>
+        <% } else { %>
+        <% statements.forEach(p => { %>
           <% const bal = Number(p.balance || 0); const paid = Number(p.amount_paid || 0); %>
           <tr>
             <td><%= p.month %></td>
             <td><%= (p.sub_item_name && String(p.sub_item_name).trim()) ? p.sub_item_name : ('#' + p.subscription_id) %></td>
+            <td>₹<%= Number(p.month_fee || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 }) %></td>
             <td>₹<%= p.amount_due %></td>
             <td>₹<%= p.amount_paid %></td>
             <td>₹<%= p.balance %></td>
@@ -87,8 +101,56 @@
             </td>
           </tr>
         <% }) %>
+        <% } %>
       </tbody>
     </table>
   </div>
+  <%- include('_pagination', { pagination: typeof paginationStatements !== 'undefined' ? paginationStatements : null }) %>
+
+  <h3>Recent payments</h3>
+  <p class="customer-view__hint">Months where you have recorded <strong>amount paid</strong> (cash or transfer applied to a line). Open a row to adjust. <a href="/payment/customer/<%= customer.id %>">Full payments list</a></p>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Month</th>
+          <th>Subscription</th>
+          <th>Paid</th>
+          <th>Balance</th>
+          <th>Status</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% const recentPayments = locals.recentPayments || []; %>
+        <% if (!recentPayments.length) { %>
+          <tr>
+            <td colspan="6" class="customer-list__empty">No recorded payments yet. When you receive money, record it from a statement line or the payments list.</td>
+          </tr>
+        <% } else { %>
+          <% recentPayments.forEach(p => { %>
+            <% const bal = Number(p.balance || 0); const paid = Number(p.amount_paid || 0); %>
+            <tr>
+              <td><%= p.month %></td>
+              <td><%= (p.sub_item_name && String(p.sub_item_name).trim()) ? p.sub_item_name : ('#' + p.subscription_id) %></td>
+              <td>₹<%= p.amount_paid %></td>
+              <td>₹<%= p.balance %></td>
+              <td>
+                <% if (bal <= 0) { %>
+                  <span class="badge badge--success">Paid</span>
+                <% } else if (paid > 0) { %>
+                  <span class="badge badge--warning">Partial</span>
+                <% } else { %>
+                  <span class="badge badge--danger">Due</span>
+                <% } %>
+              </td>
+              <td><a href="/payment/<%= p.id %>">Open</a></td>
+            </tr>
+          <% }) %>
+        <% } %>
+      </tbody>
+    </table>
+  </div>
+  <%- include('_pagination', { pagination: typeof paginationRecent !== 'undefined' ? paginationRecent : null }) %>
 </div>
 </body></html>

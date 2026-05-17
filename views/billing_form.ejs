@@ -6,13 +6,18 @@
 <%- include('_header') %>
 <div class="container">
   <a class="back-link" href="/home">Back</a>
-  <h2>Generate Billing</h2>
+  <h2>Billing &amp; statements</h2>
   <% if (error) { %>
     <p class="form-error" role="alert"><%= error %></p>
   <% } %>
+  <p class="form-hint">
+    Choose <strong>who</strong> and the <strong>period</strong> once. <strong>Generate Billing</strong> creates or updates payment rows (annual prepaid is skipped).
+    <strong>Generate statement</strong> opens a read-only table for the same period, <strong>including annual</strong> subscriptions — nothing is written to the database.
+  </p>
+
   <form method="POST" action="/billing/generate" id="billing-form">
     <fieldset class="form-fieldset">
-      <legend class="form-fieldset__legend">Who to bill</legend>
+      <legend class="form-fieldset__legend">Customer scope</legend>
       <label><input type="radio" name="billing_scope" value="all" checked> All customers</label>
       <label><input type="radio" name="billing_scope" value="customer" id="billing_scope_customer"> One customer</label>
       <label for="billing_customer_id">Customer</label>
@@ -25,7 +30,7 @@
     </fieldset>
 
     <fieldset class="form-fieldset">
-      <legend class="form-fieldset__legend">Billing period</legend>
+      <legend class="form-fieldset__legend">Period</legend>
       <label><input type="radio" name="frequency" value="monthly" checked> Monthly (one month)</label>
       <label><input type="radio" name="frequency" value="quarterly"> Quarterly (3 consecutive months)</label>
       <label><input type="radio" name="frequency" value="yearly"> Yearly (12 consecutive months)</label>
@@ -34,14 +39,17 @@
       <p class="form-hint">First calendar month in the run. Quarterly and yearly add the following months in order so balances carry forward correctly.</p>
     </fieldset>
 
-    <button type="submit">Generate Billing</button>
+    <div id="statement" class="billing-form__actions">
+      <button type="submit" formaction="/billing/generate" formmethod="post">Generate Billing</button>
+      <button type="submit" formaction="/statement/generate" formmethod="post" class="billing-form__statement-submit">Generate statement</button>
+    </div>
   </form>
 </div>
 <script>
 (function () {
   var form = document.getElementById('billing-form');
   var scopeCustomer = document.getElementById('billing_scope_customer');
-  var scopeAll = form.querySelector('input[name="billing_scope"][value="all"]');
+  var scopeAll = form && form.querySelector('input[name="billing_scope"][value="all"]');
   var select = document.getElementById('billing_customer_id');
   if (!form || !select) return;
 

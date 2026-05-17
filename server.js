@@ -24,6 +24,10 @@ const app = express();
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(session({ secret: 'secretKey', resave: false, saveUninitialized: true }));
+app.use((req, res, next) => {
+  res.locals.loggedIn = Boolean(req.session && req.session.loggedIn);
+  next();
+});
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
@@ -157,13 +161,17 @@ function getCurrentMonthKey() {
   return `${dt.getFullYear()}-${pad2(dt.getMonth()+1)}`;
 }
 
-// find last payment balance for a subscription (carry forward)
-function getLastBalance(subscriptionId) {
-  return new Promise((resolve, reject) => {
-    db.get(`SELECT balance FROM payments WHERE subscription_id = ? ORDER BY month DESC LIMIT 1`, [subscriptionId], (err, row) => {
-      if (err) return resolve(0);
-      resolve(row ? Number(row.balance || 0) : 0);
-    });
+/** Closing balance after the latest payment month strictly before `monthKey` (YYYY-MM). Used for carry-forward when billing that month. */
+function getPriorMonthClosingBalance(subscriptionId, monthKey) {
+  return new Promise((resolve) => {
+    db.get(
+      `SELECT balance FROM payments WHERE subscription_id = ? AND month < ? ORDER BY month DESC LIMIT 1`,
+      [subscriptionId, monthKey],
+      (err, row) => {
+        if (err) return resolve(0);
+        resolve(row ? Number(row.balance || 0) : 0);
+      }
+    );
   });
 }
 
@@ -189,6 +197,73 @@ function periodMonthKeys(startKey, frequency) {
   return keys;
 }
 
+const DEFAULT_TABLE_PAGE_SIZE = 10;
+const MAX_TABLE_PAGE_SIZE = 100;
+
+function parseIntInRange(raw, def, min, max) {
+  const n = parseInt(String(raw), 10);
+  if (!Number.isFinite(n)) return def;
+  return Math.min(max, Math.max(min, n));
+}
+
+/** Default 10 rows per table; `page` query (1-based). */
+function parseTablePagination(req, maxPerPage = MAX_TABLE_PAGE_SIZE) {
+  const perPage = parseIntInRange(req.query.per_page, DEFAULT_TABLE_PAGE_SIZE, 1, maxPerPage);
+  const page = parseIntInRange(req.query.page, 1, 1, 1_000_000);
+  return { page, perPage };
+}
+
+/** Customer view: separate page index per table (`spage`, `tpage`, `rpage`). */
+function parseCustomerViewTablePages(req) {
+  const perPage = parseIntInRange(req.query.per_page, DEFAULT_TABLE_PAGE_SIZE, 1, MAX_TABLE_PAGE_SIZE);
+  const spage = parseIntInRange(req.query.spage, 1, 1, 1_000_000);
+  const tpage = parseIntInRange(req.query.tpage, 1, 1, 1_000_000);
+  const rpage = parseIntInRange(req.query.rpage, 1, 1, 1_000_000);
+  return { perPage, spage, tpage, rpage };
+}
+
+function slicePaginationMeta(total, page, perPage) {
+  if (total <= 0) {
+    return { page: 1, perPage, total: 0, totalPages: 1, offset: 0, from: 0, to: 0 };
+  }
+  const totalPages = Math.max(1, Math.ceil(total / perPage));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const offset = (safePage - 1) * perPage;
+  return {
+    page: safePage,
+    perPage,
+    total,
+    totalPages,
+    offset,
+    from: offset + 1,
+    to: Math.min(offset + perPage, total),
+  };
+}
+
+/**
+ * @param {string} pageKey query param holding page number (e.g. `page`, `spage`)
+ * @param {Record<string, string|number>} baseQuery repeated on every link (other page keys preserved)
+ */
+function paginationNav(basePath, baseQuery, pageKey, page, perPage, total) {
+  const meta = slicePaginationMeta(total, page, perPage);
+  const build = (p) => {
+    const sp = new URLSearchParams();
+    const merged = { ...(baseQuery || {}), [pageKey]: String(p), per_page: String(meta.perPage) };
+    Object.entries(merged).forEach(([k, v]) => {
+      if (v === undefined || v === null || String(v) === '') return;
+      sp.set(k, String(v));
+    });
+    return `${basePath}?${sp.toString()}`;
+  };
+  return {
+    ...meta,
+    firstUrl: meta.total > 0 ? build(1) : null,
+    prevUrl: meta.total > 0 && meta.page > 1 ? build(meta.page - 1) : null,
+    nextUrl: meta.total > 0 && meta.page < meta.totalPages ? build(meta.page + 1) : null,
+    lastUrl: meta.total > 0 ? build(meta.totalPages) : null,
+  };
+}
+
 /** Oldest → newest, `n` calendar months ending in `endMonthKey` (inclusive). */
 function lastNMonthKeysEndingAt(endMonthKey, n) {
   const keys = [];
@@ -196,6 +271,40 @@ function lastNMonthKeysEndingAt(endMonthKey, n) {
     const k = addCalendarMonthsToKey(endMonthKey, -i);
     if (!k) return [];
     keys.push(k);
+  }
+  return keys;
+}
+
+function parseReportsTenure(raw) {
+  const allowed = ['current', 'last_month', 'last_3', 'last_6', 'last_year'];
+  const v = String(raw || '').trim();
+  return allowed.includes(v) ? v : 'last_year';
+}
+
+function reportsRangeForTenure(tenure, currentMonthKey) {
+  const end = currentMonthKey;
+  if (tenure === 'current') return { rangeStart: end, rangeEnd: end };
+  if (tenure === 'last_month') {
+    const m = addCalendarMonthsToKey(end, -1);
+    return { rangeStart: m || end, rangeEnd: m || end };
+  }
+  if (tenure === 'last_3') return { rangeStart: addCalendarMonthsToKey(end, -2) || end, rangeEnd: end };
+  if (tenure === 'last_6') return { rangeStart: addCalendarMonthsToKey(end, -5) || end, rangeEnd: end };
+  return { rangeStart: addCalendarMonthsToKey(end, -11) || end, rangeEnd: end };
+}
+
+/** Inclusive YYYY-MM keys from rangeStart through rangeEnd. */
+function monthKeysInclusiveSpan(startKey, endKey) {
+  if (!startKey || !endKey) return [];
+  if (startKey > endKey) return [endKey];
+  const keys = [];
+  let k = startKey;
+  for (;;) {
+    keys.push(k);
+    if (k >= endKey) break;
+    const next = addCalendarMonthsToKey(k, 1);
+    if (!next || next === k) break;
+    k = next;
   }
   return keys;
 }
@@ -330,7 +439,7 @@ function processOneMonthBilling(monthKey, customerId) {
               );
             }
 
-            const prevBalance = await getLastBalance(s.id);
+            const prevBalance = await getPriorMonthClosingBalance(s.id, monthKey);
             const totalDue = (prevBalance || 0) + amountForThisSub;
 
             db.get(
@@ -600,24 +709,77 @@ app.post('/customer/edit/:id', requireAuth, (req, res) => {
 
 app.get('/customers', requireAuth, (req, res) => {
   const q = String(req.query.q || '').trim();
-  if (q) {
-    const pat = `%${escapeLikePattern(q)}%`;
-    db.all(
-      `SELECT * FROM customers
-       WHERE name LIKE ? ESCAPE '\\' OR IFNULL(mobile, '') LIKE ? ESCAPE '\\'
-       ORDER BY name COLLATE NOCASE`,
-      [pat, pat],
-      (err, rows) => {
-        if (err) return res.status(500).send('Error loading customers: ' + err.message);
-        res.render('customer_list', { customers: rows || [], searchQuery: q });
-      }
-    );
-  } else {
-    db.all('SELECT * FROM customers ORDER BY name COLLATE NOCASE', [], (err, rows) => {
-      if (err) return res.status(500).send('Error loading customers: ' + err.message);
-      res.render('customer_list', { customers: rows || [], searchQuery: '' });
+  const area = String(req.query.area || '').trim();
+  const route = String(req.query.route || '').trim();
+
+  function runList(areas, routes) {
+    const conditions = [];
+    const params = [];
+    if (q) {
+      const pat = `%${escapeLikePattern(q)}%`;
+      conditions.push("(name LIKE ? ESCAPE '\\' OR IFNULL(mobile, '') LIKE ? ESCAPE '\\')");
+      params.push(pat, pat);
+    }
+    if (area) {
+      conditions.push("TRIM(IFNULL(area_name, '')) = ?");
+      params.push(area);
+    }
+    if (route) {
+      conditions.push("TRIM(IFNULL(route_name, '')) = ?");
+      params.push(route);
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const { page, perPage } = parseTablePagination(req);
+    db.get(`SELECT COUNT(*) AS c FROM customers ${where}`, params, (eCount, countRow) => {
+      if (eCount) return res.status(500).send('Error loading customers: ' + eCount.message);
+      const total = countRow && countRow.c != null ? Number(countRow.c) : 0;
+      const meta = slicePaginationMeta(total, page, perPage);
+      const listParams = [...params, meta.perPage, meta.offset];
+      db.all(
+        `SELECT * FROM customers ${where} ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?`,
+        listParams,
+        (err, rows) => {
+          if (err) return res.status(500).send('Error loading customers: ' + err.message);
+          const baseQ = {};
+          if (q) baseQ.q = q;
+          if (area) baseQ.area = area;
+          if (route) baseQ.route = route;
+          const pagination = paginationNav('/customers', baseQ, 'page', page, perPage, total);
+          res.render('customer_list', {
+            customers: rows || [],
+            searchQuery: q,
+            filterArea: area,
+            filterRoute: route,
+            areaOptions: areas || [],
+            routeOptions: routes || [],
+            pagination,
+          });
+        }
+      );
     });
   }
+
+  db.all(
+    `SELECT DISTINCT TRIM(area_name) AS v FROM customers
+     WHERE area_name IS NOT NULL AND TRIM(area_name) <> ''
+     ORDER BY v COLLATE NOCASE`,
+    [],
+    (e1, areaRows) => {
+      if (e1) return res.status(500).send('Error loading areas: ' + e1.message);
+      const areas = (areaRows || []).map((r) => r.v);
+      db.all(
+        `SELECT DISTINCT TRIM(route_name) AS v FROM customers
+         WHERE route_name IS NOT NULL AND TRIM(route_name) <> ''
+         ORDER BY v COLLATE NOCASE`,
+        [],
+        (e2, routeRows) => {
+          if (e2) return res.status(500).send('Error loading routes: ' + e2.message);
+          const routes = (routeRows || []).map((r) => r.v);
+          runList(areas, routes);
+        }
+      );
+    }
+  );
 });
 
 // view single customer and their subscriptions
@@ -632,20 +794,142 @@ app.get('/customer/view/:id', requireAuth, async (req, res) => {
   }
   db.get('SELECT * FROM customers WHERE id = ?', [id], (e, customer) => {
     if (!customer) return res.send('Customer not found');
-    db.all('SELECT s.*, i.name as item_name FROM subscriptions s LEFT JOIN items i ON i.id = s.item_id WHERE s.customer_id = ?', [id], (err, subs) => {
-      db.all(
-        `SELECT p.*, COALESCE(s.item_name, '') AS sub_item_name
-         FROM payments p
-         LEFT JOIN subscriptions s ON s.id = p.subscription_id
-         WHERE p.customer_id = ?
-         ORDER BY p.month DESC
-         LIMIT 48`,
-        [id],
-        (err2, payments) => {
-          res.render('customer_view', { customer, subscriptions: subs, payments });
-        }
-      );
-    });
+    const { perPage, spage, tpage, rpage } = parseCustomerViewTablePages(req);
+    const basePath = `/customer/view/${cid}`;
+
+    db.get(
+      'SELECT COUNT(*) AS c FROM subscriptions s WHERE s.customer_id = ?',
+      [cid],
+      (eSubCount, subCountRow) => {
+        if (eSubCount) return res.status(500).send('Error loading subscriptions: ' + eSubCount.message);
+        const subTotal = subCountRow && subCountRow.c != null ? Number(subCountRow.c) : 0;
+        const subMeta = slicePaginationMeta(subTotal, spage, perPage);
+        db.all(
+          `SELECT s.*, i.name as item_name FROM subscriptions s
+           LEFT JOIN items i ON i.id = s.item_id
+           WHERE s.customer_id = ?
+           ORDER BY (CASE WHEN COALESCE(s.active, 1) != 0 THEN 0 ELSE 1 END), s.item_name COLLATE NOCASE
+           LIMIT ? OFFSET ?`,
+          [cid, subMeta.perPage, subMeta.offset],
+          (err, subs) => {
+            if (err) return res.status(500).send('Error loading subscriptions: ' + err.message);
+
+            db.get(
+              'SELECT COUNT(*) AS c FROM payments WHERE customer_id = ?',
+              [cid],
+              (eStCount, stCountRow) => {
+                if (eStCount) return res.status(500).send('Error loading statements: ' + eStCount.message);
+                const stmtTotal = stCountRow && stCountRow.c != null ? Number(stCountRow.c) : 0;
+                const stmtMeta = slicePaginationMeta(stmtTotal, tpage, perPage);
+                db.all(
+                  `SELECT p.*, COALESCE(s.item_name, '') AS sub_item_name,
+                      (
+                        CAST(COALESCE(p.amount_due, 0) AS REAL)
+                        - COALESCE((
+                            SELECT CAST(COALESCE(p2.balance, 0) AS REAL)
+                            FROM payments p2
+                            WHERE p2.subscription_id = p.subscription_id AND p2.month < p.month
+                            ORDER BY p2.month DESC
+                            LIMIT 1
+                          ), 0)
+                      ) AS month_fee
+                   FROM payments p
+                   LEFT JOIN subscriptions s ON s.id = p.subscription_id
+                   WHERE p.customer_id = ?
+                   ORDER BY p.month DESC
+                   LIMIT ? OFFSET ?`,
+                  [cid, stmtMeta.perPage, stmtMeta.offset],
+                  (err2, statementRows) => {
+                    if (err2) return res.status(500).send('Error loading statements: ' + err2.message);
+
+                    db.get(
+                      `SELECT IFNULL(SUM(CAST(COALESCE(balance, 0) AS REAL)), 0) AS total_due
+                       FROM payments WHERE customer_id = ? AND CAST(COALESCE(balance, 0) AS REAL) > 0`,
+                      [cid],
+                      (e3, totalRow) => {
+                        if (e3) return res.status(500).send('Error loading totals: ' + e3.message);
+                        const totalDue = totalRow && totalRow.total_due != null ? Number(totalRow.total_due) : 0;
+
+                        db.get(
+                          `SELECT COUNT(*) AS c FROM payments p
+                           WHERE p.customer_id = ? AND CAST(COALESCE(p.amount_paid, 0) AS REAL) > 0`,
+                          [cid],
+                          (eRCount, rCountRow) => {
+                            if (eRCount) return res.status(500).send('Error loading recent payments: ' + eRCount.message);
+                            const rcpTotal = rCountRow && rCountRow.c != null ? Number(rCountRow.c) : 0;
+                            const rcpMeta = slicePaginationMeta(rcpTotal, rpage, perPage);
+                            db.all(
+                              `SELECT p.*, COALESCE(s.item_name, '') AS sub_item_name
+                               FROM payments p
+                               LEFT JOIN subscriptions s ON s.id = p.subscription_id
+                               WHERE p.customer_id = ? AND CAST(COALESCE(p.amount_paid, 0) AS REAL) > 0
+                               ORDER BY p.month DESC, p.id DESC
+                               LIMIT ? OFFSET ?`,
+                              [cid, rcpMeta.perPage, rcpMeta.offset],
+                              (e4, recentRows) => {
+                                if (e4) return res.status(500).send('Error loading recent payments: ' + e4.message);
+
+                                const paginationSubs = paginationNav(
+                                  basePath,
+                                  {
+                                    per_page: String(perPage),
+                                    tpage: String(stmtMeta.page),
+                                    rpage: String(rcpMeta.page),
+                                  },
+                                  'spage',
+                                  subMeta.page,
+                                  subMeta.perPage,
+                                  subTotal
+                                );
+                                const paginationStatements = paginationNav(
+                                  basePath,
+                                  {
+                                    per_page: String(perPage),
+                                    spage: String(subMeta.page),
+                                    rpage: String(rcpMeta.page),
+                                  },
+                                  'tpage',
+                                  stmtMeta.page,
+                                  stmtMeta.perPage,
+                                  stmtTotal
+                                );
+                                const paginationRecent = paginationNav(
+                                  basePath,
+                                  {
+                                    per_page: String(perPage),
+                                    spage: String(subMeta.page),
+                                    tpage: String(stmtMeta.page),
+                                  },
+                                  'rpage',
+                                  rcpMeta.page,
+                                  rcpMeta.perPage,
+                                  rcpTotal
+                                );
+
+                                res.render('customer_view', {
+                                  customer,
+                                  subscriptions: subs || [],
+                                  statements: statementRows || [],
+                                  totalDue,
+                                  recentPayments: recentRows || [],
+                                  paginationSubs,
+                                  paginationStatements,
+                                  paginationRecent,
+                                });
+                              }
+                            );
+                          }
+                        );
+                      }
+                    );
+                  }
+                );
+              }
+            );
+          }
+        );
+      }
+    );
   });
 });
 
@@ -657,13 +941,28 @@ app.get('/items/edit/:id', requireAuth, (req, res) => {
 // ---------- Items (news/magazines rates) ----------
 app.get('/items', requireAuth, (req, res) => {
   const editId = req.query.edit;
+  const { page, perPage } = parseTablePagination(req);
   const loadList = (editItem, activeSubCount) => {
-    db.all('SELECT * FROM items ORDER BY item_type,name', [], (err, rows) => {
-      res.render('items', {
-        items: rows,
-        editItem: editItem == null ? null : editItem,
-        activeSubCount: activeSubCount == null ? 0 : activeSubCount,
-      });
+    db.get('SELECT COUNT(*) AS c FROM items', [], (eCnt, cntRow) => {
+      if (eCnt) return res.status(500).send('Error loading items: ' + eCnt.message);
+      const total = cntRow && cntRow.c != null ? Number(cntRow.c) : 0;
+      const meta = slicePaginationMeta(total, page, perPage);
+      db.all(
+        'SELECT * FROM items ORDER BY item_type,name LIMIT ? OFFSET ?',
+        [meta.perPage, meta.offset],
+        (err, rows) => {
+          if (err) return res.status(500).send('Error loading items: ' + err.message);
+          const baseQ = {};
+          if (editId != null && String(editId).trim() !== '') baseQ.edit = String(editId);
+          const pagination = paginationNav('/items', baseQ, 'page', page, perPage, total);
+          res.render('items', {
+            items: rows || [],
+            editItem: editItem == null ? null : editItem,
+            activeSubCount: activeSubCount == null ? 0 : activeSubCount,
+            pagination,
+          });
+        }
+      );
     });
   };
   if (editId != null && String(editId).trim() !== '') {
@@ -914,11 +1213,58 @@ app.post('/subscription/stop/:id', requireAuth, (req, res) => {
   });
 });
 
+/** Set subscription active (1) or inactive (0) from global list; preserves list pagination. */
+app.post('/subscription/set-active/:id', requireAuth, (req, res) => {
+  const subId = req.params.id;
+  const activeRaw = req.body.active;
+  const active = activeRaw === '1' || activeRaw === 1 ? 1 : 0;
+  const rp = req.body.return_page != null && String(req.body.return_page).trim() !== '' ? String(req.body.return_page).trim() : '1';
+  const rpp =
+    req.body.return_per_page != null && String(req.body.return_per_page).trim() !== ''
+      ? String(req.body.return_per_page).trim()
+      : String(DEFAULT_TABLE_PAGE_SIZE);
+
+  db.get('SELECT id, customer_id FROM subscriptions WHERE id = ?', [subId], (e, sub) => {
+    if (e) return res.status(500).send(e.message);
+    if (!sub) return res.status(404).send('Subscription not found');
+    const endSql =
+      active === 1
+        ? 'UPDATE subscriptions SET active = 1, end_date = NULL WHERE id = ?'
+        : "UPDATE subscriptions SET active = 0, end_date = COALESCE(end_date, date('now')) WHERE id = ?";
+    db.run(endSql, [subId], (err2) => {
+      if (err2) return res.status(500).send(err2.message);
+      const sp = new URLSearchParams();
+      sp.set('page', rp);
+      sp.set('per_page', rpp);
+      res.redirect('/subscriptions?' + sp.toString());
+    });
+  });
+});
+
 // list subscriptions
 app.get('/subscriptions', requireAuth, (req, res) => {
-  db.all(`SELECT s.*, c.name as customer_name FROM subscriptions s LEFT JOIN customers c ON c.id = s.customer_id ORDER BY c.name`, [], (err, rows) => {
-    res.render('subscriptions', { subscriptions: rows });
-  });
+  const { page, perPage } = parseTablePagination(req);
+  db.get(
+    'SELECT COUNT(*) AS c FROM subscriptions s LEFT JOIN customers c ON c.id = s.customer_id',
+    [],
+    (eCnt, cntRow) => {
+      if (eCnt) return res.status(500).send('Error loading subscriptions: ' + eCnt.message);
+      const total = cntRow && cntRow.c != null ? Number(cntRow.c) : 0;
+      const meta = slicePaginationMeta(total, page, perPage);
+      db.all(
+        `SELECT s.*, c.name as customer_name FROM subscriptions s
+         LEFT JOIN customers c ON c.id = s.customer_id
+         ORDER BY c.name COLLATE NOCASE
+         LIMIT ? OFFSET ?`,
+        [meta.perPage, meta.offset],
+        (err, rows) => {
+          if (err) return res.status(500).send('Error loading subscriptions: ' + err.message);
+          const pagination = paginationNav('/subscriptions', {}, 'page', page, perPage, total);
+          res.render('subscriptions', { subscriptions: rows || [], pagination });
+        }
+      );
+    }
+  );
 });
 
 // ---------- Billing: generate monthly billing ----------
@@ -992,6 +1338,80 @@ function enrichBillingSummaryRows(list, done) {
   });
 }
 
+/**
+ * Read-only statement rows: every active subscription overlapping each month (including annual),
+ * left-joined to that month’s payment row if it exists.
+ */
+function loadStatementRowsAllMonths(monthKeys, customerId, done) {
+  const sorted = [...monthKeys].filter((m) => /^\d{4}-\d{2}$/.test(m)).sort();
+  const rows = [];
+  let idx = 0;
+
+  function step(err) {
+    if (err) return done(err);
+    if (idx >= sorted.length) {
+      rows.sort((a, b) => {
+        const cm = String(a.month || '').localeCompare(String(b.month || ''));
+        if (cm !== 0) return cm;
+        const cn = String(a.customer_name || '').localeCompare(String(b.customer_name || ''), undefined, {
+          sensitivity: 'base',
+        });
+        if (cn !== 0) return cn;
+        return String(a.item_name || '').localeCompare(String(b.item_name || ''), undefined, { sensitivity: 'base' });
+      });
+      return done(null, rows);
+    }
+    const mk = sorted[idx++];
+    let sql = `SELECT ? AS month,
+        s.id AS subscription_id,
+        s.customer_id,
+        c.name AS customer_name,
+        c.mobile AS customer_mobile,
+        s.item_name,
+        COALESCE(i.monthly_rate, s.monthly_rate, 295) AS subscription_monthly_rate,
+        COALESCE(s.is_sunday_only, 0) AS subscription_is_sunday_only,
+        COALESCE(s.is_annual, 0) AS subscription_is_annual,
+        p.id, p.amount_due, p.amount_paid, p.balance
+      FROM subscriptions s
+      JOIN customers c ON c.id = s.customer_id
+      LEFT JOIN items i ON i.id = s.item_id
+      LEFT JOIN payments p ON p.subscription_id = s.id AND p.month = ?
+      WHERE s.active = 1
+        AND (s.end_date IS NULL OR date(s.end_date) >= date(?,'start of month'))
+        AND (s.start_date IS NULL OR date(s.start_date) <= date(?,'start of month','+1 month','-1 day'))`;
+    const params = [mk, mk, `${mk}-01`, `${mk}-01`];
+    if (customerId != null && Number.isFinite(customerId)) {
+      sql += ' AND c.id = ?';
+      params.push(customerId);
+    }
+    sql += ` ORDER BY COALESCE(c.name, '') COLLATE NOCASE, COALESCE(s.item_name, '') COLLATE NOCASE`;
+    db.all(sql, params, (e, r) => {
+      if (e) return step(e);
+      rows.push(...(r || []));
+      step(null);
+    });
+  }
+
+  step(null);
+}
+
+function totalsForStatement(enriched) {
+  return enriched.reduce(
+    (acc, r) => {
+      const pc = Number(r.period_charge);
+      if (Number.isFinite(pc)) acc.periodCharge += pc;
+      const hasPayment = r.id != null && r.id !== '';
+      if (hasPayment) {
+        acc.amountDue += Number(r.amount_due || 0);
+        acc.amountPaid += Number(r.amount_paid || 0);
+        acc.balance += Number(r.balance || 0);
+      }
+      return acc;
+    },
+    { amountDue: 0, amountPaid: 0, balance: 0, periodCharge: 0 }
+  );
+}
+
 app.get('/billing/summary', requireAuth, (req, res) => {
   const months = String(req.query.months || '')
     .split(',')
@@ -1044,15 +1464,126 @@ app.get('/billing/summary', requireAuth, (req, res) => {
       );
       const subscriptionMonths = Number(req.query.billed || '') || enriched.length;
 
+      const { page, perPage } = parseTablePagination(req);
+      const tableTotal = enriched.length;
+      const meta = slicePaginationMeta(tableTotal, page, perPage);
+      const pageRows = enriched.slice(meta.offset, meta.offset + meta.perPage);
+      const baseQ = { months: months.join(','), frequency, scope };
+      if (customerId != null) baseQ.customer_id = String(customerId);
+      if (req.query.billed != null && String(req.query.billed).trim() !== '') {
+        baseQ.billed = String(req.query.billed);
+      }
+      const pagination = paginationNav('/billing/summary', baseQ, 'page', page, perPage, tableTotal);
+
       const finish = (customerRow) => {
         res.render('billing_summary', {
           months,
           frequency,
           scope,
           customer: customerRow,
-          rows: enriched,
+          rows: pageRows,
           totals,
           subscriptionMonths,
+          pagination,
+        });
+      };
+
+      if (customerId != null) {
+        db.get('SELECT id, name, mobile FROM customers WHERE id = ?', [customerId], (e2, c) => finish(c || null));
+      } else {
+        finish(null);
+      }
+    });
+  });
+});
+
+// ---------- Statement (read-only; includes annual subscriptions) ----------
+app.get('/statement/form', requireAuth, (req, res) => {
+  const m = req.query.month || getCurrentMonthKey();
+  const error = req.query.error ? String(req.query.error) : null;
+  const q = new URLSearchParams();
+  q.set('month', m);
+  if (error) q.set('error', error);
+  return res.redirect(302, '/billing/form?' + q.toString() + '#statement');
+});
+
+app.post('/statement/generate', requireAuth, (req, res) => {
+  const monthKey = String(req.body.month || '').trim() || getCurrentMonthKey();
+  if (!/^\d{4}-\d{2}$/.test(monthKey)) {
+    return res.redirect('/billing/form?error=' + encodeURIComponent('Invalid period start. Use YYYY-MM.') + '#statement');
+  }
+  const frequency = ['monthly', 'quarterly', 'yearly'].includes(req.body.frequency)
+    ? req.body.frequency
+    : 'monthly';
+  const scope = req.body.billing_scope === 'customer' ? 'customer' : 'all';
+  let customerId = null;
+  if (scope === 'customer') {
+    customerId = Number(req.body.customer_id);
+    if (!Number.isFinite(customerId) || customerId <= 0) {
+      return res.redirect(
+        '/billing/form?error=' + encodeURIComponent('Select a customer for a people-based statement.') + '#statement'
+      );
+    }
+  }
+
+  const monthKeys = periodMonthKeys(monthKey, frequency);
+  if (monthKeys.length === 0) {
+    return res.redirect(
+      '/billing/form?error=' + encodeURIComponent('Could not build statement period from that month.') + '#statement'
+    );
+  }
+
+  const q = new URLSearchParams({
+    months: monthKeys.join(','),
+    frequency,
+    scope,
+  });
+  if (customerId != null) q.set('customer_id', String(customerId));
+  return res.redirect(302, '/statement/summary?' + q.toString());
+});
+
+app.get('/statement/summary', requireAuth, (req, res) => {
+  const months = String(req.query.months || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((m) => /^\d{4}-\d{2}$/.test(m));
+  if (!months.length) return res.redirect('/billing/form#statement');
+
+  const frequency = ['monthly', 'quarterly', 'yearly'].includes(String(req.query.frequency || ''))
+    ? req.query.frequency
+    : 'monthly';
+  const scope = req.query.scope === 'customer' ? 'customer' : 'all';
+  const customerIdRaw = req.query.customer_id;
+  const customerId =
+    customerIdRaw != null && String(customerIdRaw).trim() !== '' && Number.isFinite(Number(customerIdRaw))
+      ? Number(customerIdRaw)
+      : null;
+
+  loadStatementRowsAllMonths(months, customerId, (err, list) => {
+    if (err) return res.status(500).send('Could not load statement: ' + err.message);
+    enrichBillingSummaryRows(list || [], (e3, enriched) => {
+      if (e3) return res.status(500).send('Could not load statement: ' + e3.message);
+      const totals = totalsForStatement(enriched);
+      const subscriptionMonths = enriched.length;
+
+      const { page, perPage } = parseTablePagination(req);
+      const tableTotal = enriched.length;
+      const meta = slicePaginationMeta(tableTotal, page, perPage);
+      const pageRows = enriched.slice(meta.offset, meta.offset + meta.perPage);
+      const baseQ = { months: months.join(','), frequency, scope };
+      if (customerId != null) baseQ.customer_id = String(customerId);
+      const pagination = paginationNav('/statement/summary', baseQ, 'page', page, perPage, tableTotal);
+
+      const finish = (customerRow) => {
+        res.render('statement_summary', {
+          months,
+          frequency,
+          scope,
+          customer: customerRow,
+          rows: pageRows,
+          totals,
+          subscriptionMonths,
+          pagination,
         });
       };
 
@@ -1116,6 +1647,7 @@ app.get('/payment/customer/:customerId', requireAuth, async (req, res) => {
   const cidRaw = req.params.customerId;
   const cid = Number(cidRaw);
   if (!Number.isFinite(cid)) return res.status(400).send('Invalid customer id');
+  const { page, perPage } = parseTablePagination(req);
   try {
     await ensureBillingThroughCurrentForScope(cid);
   } catch (e) {
@@ -1123,8 +1655,48 @@ app.get('/payment/customer/:customerId', requireAuth, async (req, res) => {
   }
   db.get('SELECT * FROM customers WHERE id = ?', [cid], (e, cust) => {
     if (!cust) return res.send('Customer not found');
-    db.all(`SELECT p.*, s.item_name FROM payments p LEFT JOIN subscriptions s ON s.id = p.subscription_id WHERE p.customer_id = ? ORDER BY p.month DESC`, [cid], (err, rows) => {
-      res.render('payment_customer', { customer: cust, payments: rows });
+    db.get('SELECT COUNT(*) AS c FROM subscriptions s WHERE s.customer_id = ?', [cid], (eCnt, cntRow) => {
+      if (eCnt) return res.status(500).send('Error loading subscriptions: ' + eCnt.message);
+      const total = cntRow && cntRow.c != null ? Number(cntRow.c) : 0;
+      const meta = slicePaginationMeta(total, page, perPage);
+      db.all(
+        `SELECT s.id AS subscription_id,
+              COALESCE(NULLIF(TRIM(s.item_name), ''), 'Subscription') AS item_name,
+              COALESCE(s.active, 1) AS active,
+              (
+                SELECT p.month FROM payments p
+                WHERE p.subscription_id = s.id
+                ORDER BY p.month DESC LIMIT 1
+              ) AS latest_month,
+              (
+                SELECT p.id FROM payments p
+                WHERE p.subscription_id = s.id
+                ORDER BY p.month DESC LIMIT 1
+              ) AS latest_payment_id,
+              COALESCE((
+                SELECT CAST(COALESCE(p.balance, 0) AS REAL) FROM payments p
+                WHERE p.subscription_id = s.id
+                ORDER BY p.month DESC LIMIT 1
+              ), 0) AS balance
+       FROM subscriptions s
+       WHERE s.customer_id = ?
+       ORDER BY (CASE WHEN COALESCE(s.active, 1) != 0 THEN 0 ELSE 1 END),
+                s.item_name COLLATE NOCASE
+       LIMIT ? OFFSET ?`,
+        [cid, meta.perPage, meta.offset],
+        (err, rows) => {
+          if (err) return res.status(500).send('Error loading subscriptions: ' + err.message);
+          const pagination = paginationNav(
+            `/payment/customer/${cid}`,
+            {},
+            'page',
+            page,
+            perPage,
+            total
+          );
+          res.render('payment_customer', { customer: cust, subscriptionSummaries: rows || [], pagination });
+        }
+      );
     });
   });
 });
@@ -1279,8 +1851,19 @@ app.post('/settings', requireAuth, (req, res) => {
 // ---------- Minimal extra pages ----------
 app.get('/reports', requireAuth, (req, res) => {
   const currentMonth = getCurrentMonthKey();
-  const trendMonths = lastNMonthKeysEndingAt(currentMonth, 12);
-  const oldestMonth = trendMonths[0];
+  const tenure = parseReportsTenure(req.query.tenure);
+  const { rangeStart, rangeEnd } = reportsRangeForTenure(tenure, currentMonth);
+  const trendMonths = monthKeysInclusiveSpan(rangeStart, rangeEnd);
+  if (!trendMonths.length) trendMonths.push(rangeEnd);
+
+  const tenureLabels = {
+    current: 'Current month',
+    last_month: 'Last month',
+    last_3: 'Last 3 months',
+    last_6: 'Last 6 months',
+    last_year: 'Last 12 months',
+  };
+  const kpiCollectedLabel = rangeStart === rangeEnd ? rangeStart : `${rangeStart} – ${rangeEnd}`;
 
   db.get(
     'SELECT COUNT(*) AS c FROM customers WHERE COALESCE(active, 1) != 0',
@@ -1292,81 +1875,106 @@ app.get('/reports', requireAuth, (req, res) => {
         [],
         (e2, rowSubs) => {
           if (e2) return res.status(500).send('Database error: ' + e2.message);
-          db.all(
-            `SELECT month,
-                    SUM(COALESCE(amount_due, 0)) AS amount_due,
-                    SUM(COALESCE(amount_paid, 0)) AS amount_paid,
-                    SUM(COALESCE(balance, 0)) AS balance
-             FROM payments WHERE month >= ? GROUP BY month ORDER BY month`,
-            [oldestMonth],
-            (e3, trendRows) => {
-              if (e3) return res.status(500).send('Database error: ' + e3.message);
-              const trendMap = {};
-              (trendRows || []).forEach((r) => {
-                trendMap[r.month] = r;
-              });
-              const trend = trendMonths.map((m) => ({
-                month: m,
-                amount_due: trendMap[m] ? Number(trendMap[m].amount_due) : 0,
-                amount_paid: trendMap[m] ? Number(trendMap[m].amount_paid) : 0,
-                balance: trendMap[m] ? Number(trendMap[m].balance) : 0,
-              }));
-
-              db.all(
-                `SELECT COALESCE(s.item_name, '(no item)') AS item_name,
-                        SUM(COALESCE(p.balance, 0)) AS total_balance
-                 FROM payments p
-                 LEFT JOIN subscriptions s ON s.id = p.subscription_id
-                 WHERE p.month = ?
-                 GROUP BY COALESCE(s.item_name, '(no item)')
-                 ORDER BY total_balance DESC`,
-                [currentMonth],
-                (e4, byItemRows) => {
-                  if (e4) return res.status(500).send('Database error: ' + e4.message);
-                  const byItem = (byItemRows || []).map((r) => ({
-                    label: r.item_name,
-                    value: Number(r.total_balance) || 0,
-                  }));
-
+          db.get(
+            `SELECT IFNULL(SUM(CAST(COALESCE(amount_paid, 0) AS REAL)), 0) AS s
+             FROM payments WHERE month >= ? AND month <= ?`,
+            [rangeStart, rangeEnd],
+            (ePaid, rowPaid) => {
+              if (ePaid) return res.status(500).send('Database error: ' + ePaid.message);
+              db.get(
+                `SELECT IFNULL(SUM(CAST(COALESCE(balance, 0) AS REAL)), 0) AS s
+                 FROM payments WHERE month = ?`,
+                [rangeEnd],
+                (eBal, rowBal) => {
+                  if (eBal) return res.status(500).send('Database error: ' + eBal.message);
                   db.all(
-                    `SELECT c.name AS customer_name, SUM(COALESCE(p.balance, 0)) AS total_balance
-                     FROM payments p
-                     JOIN customers c ON c.id = p.customer_id
-                     WHERE CAST(COALESCE(p.balance, 0) AS REAL) > 0
-                     GROUP BY c.id
-                     ORDER BY total_balance DESC
-                     LIMIT 10`,
-                    [],
-                    (e5, debtRows) => {
-                      if (e5) return res.status(500).send('Database error: ' + e5.message);
-                      const topDebtors = (debtRows || []).map((r) => ({
-                        label: r.customer_name,
-                        value: Number(r.total_balance) || 0,
+                    `SELECT month,
+                            SUM(COALESCE(amount_due, 0)) AS amount_due,
+                            SUM(COALESCE(amount_paid, 0)) AS amount_paid,
+                            SUM(COALESCE(balance, 0)) AS balance
+                     FROM payments WHERE month >= ? AND month <= ? GROUP BY month ORDER BY month`,
+                    [rangeStart, rangeEnd],
+                    (e3, trendRows) => {
+                      if (e3) return res.status(500).send('Database error: ' + e3.message);
+                      const trendMap = {};
+                      (trendRows || []).forEach((r) => {
+                        trendMap[r.month] = r;
+                      });
+                      const trend = trendMonths.map((m) => ({
+                        month: m,
+                        amount_due: trendMap[m] ? Number(trendMap[m].amount_due) : 0,
+                        amount_paid: trendMap[m] ? Number(trendMap[m].amount_paid) : 0,
+                        balance: trendMap[m] ? Number(trendMap[m].balance) : 0,
                       }));
 
-                      const cur = trend[trend.length - 1] || {
-                        amount_due: 0,
-                        amount_paid: 0,
-                        balance: 0,
-                      };
-                      const chartPayload = {
-                        trend,
-                        byItem,
-                        topDebtors,
-                        currentMonth,
-                      };
-                      res.render('reports', {
-                        currentMonth,
-                        exportOldest: oldestMonth,
-                        kpi: {
-                          activeCustomers: rowCustomers ? rowCustomers.c : 0,
-                          activeSubscriptions: rowSubs ? rowSubs.c : 0,
-                          monthDue: cur.amount_due,
-                          monthPaid: cur.amount_paid,
-                          monthBalance: cur.balance,
-                        },
-                        chartPayloadJson: JSON.stringify(chartPayload).replace(/</g, '\\u003c'),
-                      });
+                      db.all(
+                        `SELECT COALESCE(s.item_name, '(no item)') AS item_name,
+                                SUM(COALESCE(p.balance, 0)) AS total_balance
+                         FROM payments p
+                         LEFT JOIN subscriptions s ON s.id = p.subscription_id
+                         WHERE p.month = ?
+                         GROUP BY COALESCE(s.item_name, '(no item)')
+                         ORDER BY total_balance DESC`,
+                        [rangeEnd],
+                        (e4, byItemRows) => {
+                          if (e4) return res.status(500).send('Database error: ' + e4.message);
+                          const byItem = (byItemRows || []).map((r) => ({
+                            label: r.item_name,
+                            value: Number(r.total_balance) || 0,
+                          }));
+
+                          db.all(
+                            `SELECT c.name AS customer_name, SUM(COALESCE(p.balance, 0)) AS total_balance
+                             FROM payments p
+                             JOIN customers c ON c.id = p.customer_id
+                             WHERE p.month = ? AND CAST(COALESCE(p.balance, 0) AS REAL) > 0
+                             GROUP BY c.id
+                             ORDER BY total_balance DESC
+                             LIMIT 10`,
+                            [rangeEnd],
+                            (e5, debtRows) => {
+                              if (e5) return res.status(500).send('Database error: ' + e5.message);
+                              const topDebtors = (debtRows || []).map((r) => ({
+                                label: r.customer_name,
+                                value: Number(r.total_balance) || 0,
+                              }));
+
+                              const trendSub =
+                                rangeStart === rangeEnd
+                                  ? `${rangeEnd} only`
+                                  : `${rangeStart} through ${rangeEnd} (stacked)`;
+                              const chartPayload = {
+                                trend,
+                                byItem,
+                                topDebtors,
+                                currentMonth,
+                                rangeStart,
+                                rangeEnd,
+                                tenure,
+                              };
+                              res.render('reports', {
+                                tenure,
+                                tenureLabel: tenureLabels[tenure] || tenure,
+                                rangeStart,
+                                rangeEnd,
+                                trendSub,
+                                kpiCollectedLabel,
+                                kpiOutstandingLabel: rangeEnd,
+                                currentMonth,
+                                exportOldest: rangeStart,
+                                exportTo: rangeEnd,
+                                kpi: {
+                                  activeCustomers: rowCustomers ? rowCustomers.c : 0,
+                                  activeSubscriptions: rowSubs ? rowSubs.c : 0,
+                                  monthPaid: rowPaid && rowPaid.s != null ? Number(rowPaid.s) : 0,
+                                  monthBalance: rowBal && rowBal.s != null ? Number(rowBal.s) : 0,
+                                },
+                                chartPayloadJson: JSON.stringify(chartPayload).replace(/</g, '\\u003c'),
+                              });
+                            }
+                          );
+                        }
+                      );
                     }
                   );
                 }
@@ -1379,7 +1987,21 @@ app.get('/reports', requireAuth, (req, res) => {
   );
 });
 app.get('/delivery', requireAuth, (req, res) => {
-  db.all('SELECT * FROM delivery_boys', [], (e, rows) => res.render('delivery', { boys: rows }));
+  const { page, perPage } = parseTablePagination(req);
+  db.get('SELECT COUNT(*) AS c FROM delivery_boys', [], (eCnt, cntRow) => {
+    if (eCnt) return res.status(500).send('Error loading delivery list: ' + eCnt.message);
+    const total = cntRow && cntRow.c != null ? Number(cntRow.c) : 0;
+    const meta = slicePaginationMeta(total, page, perPage);
+    db.all(
+      'SELECT * FROM delivery_boys ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?',
+      [meta.perPage, meta.offset],
+      (e, rows) => {
+        if (e) return res.status(500).send('Error loading delivery list: ' + e.message);
+        const pagination = paginationNav('/delivery', {}, 'page', page, perPage, total);
+        res.render('delivery', { boys: rows || [], pagination });
+      }
+    );
+  });
 });
 
 // ---------- Start ----------

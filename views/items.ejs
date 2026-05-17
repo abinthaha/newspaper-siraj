@@ -53,6 +53,7 @@
       </tbody>
     </table>
   </div>
+  <%- include('_pagination', { pagination: typeof pagination !== 'undefined' ? pagination : null }) %>
 </div>
 <script>
 (function () {
