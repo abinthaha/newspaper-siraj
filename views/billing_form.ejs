@@ -1,13 +1,68 @@
+<% const customers = locals.customers || []; %>
+<% const error = locals.error || null; %>
 <!doctype html>
 <html><head><meta charset="utf-8"><title>Billing</title><link rel="stylesheet" href="/styles.css"></head>
 <body>
 <%- include('_header') %>
 <div class="container">
-  <a href="/home">Back</a>
+  <a class="back-link" href="/home">Back</a>
   <h2>Generate Billing</h2>
-  <form method="POST" action="/billing/generate">
-    <label>Month (YYYY-MM)</label><input name="month" value="<%= month %>">
+  <% if (error) { %>
+    <p class="form-error" role="alert"><%= error %></p>
+  <% } %>
+  <form method="POST" action="/billing/generate" id="billing-form">
+    <fieldset class="form-fieldset">
+      <legend class="form-fieldset__legend">Who to bill</legend>
+      <label><input type="radio" name="billing_scope" value="all" checked> All customers</label>
+      <label><input type="radio" name="billing_scope" value="customer" id="billing_scope_customer"> One customer</label>
+      <label for="billing_customer_id">Customer</label>
+      <select name="customer_id" id="billing_customer_id" disabled>
+        <option value="">— Select customer —</option>
+        <% customers.forEach(function (c) { %>
+        <option value="<%= c.id %>"><%= c.name %><%= c.mobile ? ' — ' + c.mobile : '' %></option>
+        <% }); %>
+      </select>
+    </fieldset>
+
+    <fieldset class="form-fieldset">
+      <legend class="form-fieldset__legend">Billing period</legend>
+      <label><input type="radio" name="frequency" value="monthly" checked> Monthly (one month)</label>
+      <label><input type="radio" name="frequency" value="quarterly"> Quarterly (3 consecutive months)</label>
+      <label><input type="radio" name="frequency" value="yearly"> Yearly (12 consecutive months)</label>
+      <label for="billing_month">Period start (YYYY-MM)</label>
+      <input name="month" id="billing_month" value="<%= month %>" pattern="[0-9]{4}-[0-9]{2}" placeholder="2026-05" required>
+      <p class="form-hint">First calendar month in the run. Quarterly and yearly add the following months in order so balances carry forward correctly.</p>
+    </fieldset>
+
     <button type="submit">Generate Billing</button>
   </form>
 </div>
+<script>
+(function () {
+  var form = document.getElementById('billing-form');
+  var scopeCustomer = document.getElementById('billing_scope_customer');
+  var scopeAll = form.querySelector('input[name="billing_scope"][value="all"]');
+  var select = document.getElementById('billing_customer_id');
+  if (!form || !select) return;
+
+  function syncCustomerField() {
+    var one = scopeCustomer && scopeCustomer.checked;
+    select.disabled = !one;
+    select.required = !!one;
+    if (!one) select.setCustomValidity('');
+  }
+
+  scopeAll && scopeAll.addEventListener('change', syncCustomerField);
+  scopeCustomer && scopeCustomer.addEventListener('change', syncCustomerField);
+  form.addEventListener('submit', function () {
+    if (scopeCustomer && scopeCustomer.checked) {
+      if (!select.value) select.setCustomValidity('Choose a customer.');
+      else select.setCustomValidity('');
+    } else {
+      select.setCustomValidity('');
+    }
+  });
+  syncCustomerField();
+})();
+</script>
 </body></html>

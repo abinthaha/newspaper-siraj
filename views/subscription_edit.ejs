@@ -1,0 +1,24 @@
+<% const s = locals.subscription; %>
+<% const rateVal = s.monthly_rate != null && s.monthly_rate !== '' ? s.monthly_rate : ''; %>
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Edit subscription</title><link rel="stylesheet" href="/styles.css"></head>
+<body>
+<%- include('_header') %>
+<div class="container">
+  <a class="back-link" href="/customer/view/<%= s.customer_id %>">Back</a>
+  <h2>Edit subscription</h2>
+  <p class="form-hint"><strong><%= s.customer_name %></strong> — <%= (s.item_name && String(s.item_name).trim()) ? s.item_name : 'Publication' %></p>
+  <form method="POST" action="/subscription/edit/<%= s.id %>">
+    <label>Monthly rate (₹)</label>
+    <input name="monthly_rate" type="number" min="0" step="any" required value="<%= rateVal %>">
+    <p class="form-hint">Defaults to the rate stored on this subscription; change if you bill a custom amount.</p>
+    <label>Start date <span class="form-required">*</span></label>
+    <input name="start_date" type="date" required value="<%= s.start_date || '' %>">
+    <label>End date (optional)</label>
+    <input name="end_date" type="date" value="<%= s.end_date || '' %>">
+    <label><input type="checkbox" name="is_annual" value="1"<%= Number(s.is_annual) === 1 ? ' checked' : '' %>> Annual (prepaid) subscription — no monthly billing</label>
+    <label><input type="checkbox" name="is_sunday_only" value="1"<%= Number(s.is_sunday_only) === 1 ? ' checked' : '' %>> Sunday-only (₹10 per Sunday)</label>
+    <button type="submit">Save changes</button>
+  </form>
+</div>
+</body></html>

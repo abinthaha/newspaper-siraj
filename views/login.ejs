@@ -6,8 +6,8 @@
   <h2>Login</h2>
   <% if (error) { %><p class="error"><%= error %></p><% } %>
   <form method="POST" action="/login">
-    <label>Username</label><input name="username" required>
-    <label>Password</label><input name="password" type="password" required>
+    <label>Username</label><input value="admin" name="username" required>
+    <label>Password</label><input value="admin" name="password" type="password" required>
     <button type="submit">Login</button>
   </form>
 </div>

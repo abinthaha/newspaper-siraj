@@ -1,23 +1,51 @@
+<% const customer = locals.customer == null ? null : locals.customer; %>
+<% const editing = locals.editing === true && customer != null; %>
+<% const subscriptionItems = locals.subscriptionItems || []; %>
+<% const activeItemIds = locals.activeItemIds || []; %>
 <!doctype html>
-<html><head><meta charset="utf-8"><title>Add Customer</title><link rel="stylesheet" href="/styles.css"></head>
+<html><head><meta charset="utf-8"><title><%= editing ? 'Edit Customer' : 'Add Customer' %></title><link rel="stylesheet" href="/styles.css"></head>
 <body>
 <%- include('_header') %>
 <div class="container">
-  <a href="/home">Back</a>
-  <h2>Add Customer</h2>
-  <form method="POST" action="/customer/add">
-    <label>Name</label><input name="name" required>
-    <label>Address</label><input name="address">
-    <label>Mobile</label><input name="mobile">
-    <label>Area</label><input name="area_name">
-    <label>Route</label><input name="route_name">
-    <button type="submit">Save</button>
+  <a class="back-link" href="<%= editing ? '/customers' : '/home' %>">Back</a>
+  <h2><%= editing ? 'Edit Customer' : 'Add Customer' %></h2>
+  <form method="POST" action="<%= editing ? '/customer/edit/' + customer.id : '/customer/add' %>">
+    <label>Name</label><input name="name" required value="<%= editing ? (customer.name || '') : '' %>">
+    <label>Address</label><input name="address" value="<%= editing ? (customer.address || '') : '' %>">
+    <label>Mobile</label><input name="mobile" value="<%= editing ? (customer.mobile || '') : '' %>">
+    <label>Area</label><input name="area_name" value="<%= editing ? (customer.area_name || '') : '' %>">
+    <label>Route</label><input name="route_name" value="<%= editing ? (customer.route_name || '') : '' %>">
+    <label>Status</label>
+    <select name="active">
+      <option value="1" <%= !editing || Number(customer.active) !== 0 ? 'selected' : '' %>>Active</option>
+      <option value="0" <%= editing && Number(customer.active) === 0 ? 'selected' : '' %>>Inactive</option>
+    </select>
+    <fieldset class="form-fieldset subscription-pick">
+      <legend class="form-fieldset__legend">Subscriptions (optional)</legend>
+      <p class="form-hint subscription-pick__hint">Select one or more publications. On edit, saving updates active subscriptions to match your selection (unchecked items are stopped as of today).</p>
+      <% if (!subscriptionItems.length) { %>
+        <p class="subscription-pick__empty">No active items available. Add items under <a href="/items">Items</a> first.</p>
+      <% } else { %>
+        <div class="subscription-pick__list">
+          <% subscriptionItems.forEach(function (it) { %>
+            <% const has = activeItemIds.some(function (x) { return Number(x) === Number(it.id); }); %>
+            <label class="subscription-pick__row<%= has ? ' subscription-pick__row--current' : '' %>">
+              <input type="checkbox" name="item_ids" value="<%= it.id %>"<%= has ? ' checked' : '' %>>
+              <span><%= it.name %> — ₹<%= it.monthly_rate %>/mo (<%= it.item_type %>)<% if (has) { %> <span class="subscription-pick__badge">Active</span><% } %></span>
+            </label>
+          <% }); %>
+        </div>
+      <% } %>
+    </fieldset>
+    <label>Start date</label><input name="subscription_start_date" type="date">
+    <label>End date (optional)</label><input name="subscription_end_date" type="date">
+    <button type="submit"><%= editing ? 'Update Customer' : 'Save' %></button>
   </form>
   <hr>
   <h3>Quick Items (Existing)</h3>
   <ul>
     <% items.forEach(i => { %>
-      <li><%= i.item_type %> - <%= i.name %> : ₹<%= i.monthly_rate %></li>
+    <li><%= i.item_type %> - <%= i.name %> : ₹<%= i.monthly_rate %></li>
     <% }) %>
   </ul>
 </div>

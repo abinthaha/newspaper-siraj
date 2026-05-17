@@ -3,20 +3,44 @@
 <body>
 <%- include('_header') %>
 <div class="container">
-  <a href="/customer/view/<%= customer.id %>">Back</a>
+  <a class="back-link" href="/customer/view/<%= customer.id %>">Back</a>
   <h2>Payments for <%= customer.name %></h2>
-  <table>
-    <tr><th>Month</th><th>Item</th><th>Due</th><th>Paid</th><th>Balance</th><th>Action</th></tr>
-    <% payments.forEach(p => { %>
-      <tr>
-        <td><%= p.month %></td>
-        <td><%= p.item_name %></td>
-        <td>₹<%= p.amount_due %></td>
-        <td>₹<%= p.amount_paid %></td>
-        <td>₹<%= p.balance %></td>
-        <td><a href="/payment/<%= p.id %>">Open</a></td>
-      </tr>
-    <% }) %>
-  </table>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Month</th>
+          <th>Item</th>
+          <th>Due</th>
+          <th>Paid</th>
+          <th>Balance</th>
+          <th>Status</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% payments.forEach(p => { %>
+          <% const bal = Number(p.balance || 0); const paid = Number(p.amount_paid || 0); %>
+          <tr>
+            <td><%= p.month %></td>
+            <td><%= p.item_name %></td>
+            <td>₹<%= p.amount_due %></td>
+            <td>₹<%= p.amount_paid %></td>
+            <td>₹<%= p.balance %></td>
+            <td>
+              <% if (bal <= 0) { %>
+                <span class="badge badge--success">Paid</span>
+              <% } else if (paid > 0) { %>
+                <span class="badge badge--warning">Partial</span>
+              <% } else { %>
+                <span class="badge badge--danger">Due</span>
+              <% } %>
+            </td>
+            <td><a href="/payment/<%= p.id %>">Open</a></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
 </div>
 </body></html>

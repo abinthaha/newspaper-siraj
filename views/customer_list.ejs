@@ -1,21 +1,64 @@
+<% const q = typeof searchQuery !== 'undefined' ? searchQuery : ''; %>
 <!doctype html>
 <html><head><meta charset="utf-8"><title>Customers</title><link rel="stylesheet" href="/styles.css"></head>
 <body>
 <%- include('_header') %>
-<div class="container">
-  <a href="/home">Back</a>
+<div class="container container--customer-list">
+  <a class="back-link" href="/home">Back</a>
   <h2>Customers</h2>
-  <table>
-    <tr><th>Name</th><th>Mobile</th><th>Area</th><th>Route</th><th>Action</th></tr>
-    <% customers.forEach(c=>{ %>
-      <tr>
-        <td><%= c.name %></td>
-        <td><%= c.mobile %></td>
-        <td><%= c.area_name || '' %></td>
-        <td><%= c.route_name || '' %></td>
-        <td><a href="/customer/view/<%= c.id %>">View</a> | <a href="/subscription/add/<%= c.id %>">Add subscription</a></td>
-      </tr>
-    <% }) %>
-  </table>
+
+  <form class="customer-list__search" method="get" action="/customers" role="search">
+    <label class="customer-list__search-label" for="customer-search-q">Search by name or mobile</label>
+    <div class="customer-list__search-row">
+      <input type="search" id="customer-search-q" name="q" value="<%= q %>" placeholder="e.g. Nazim or 98765" autocomplete="off" maxlength="80">
+      <button type="submit">Search</button>
+      <% if (q) { %>
+        <a class="customer-list__clear" href="/customers">Clear</a>
+      <% } %>
+    </div>
+  </form>
+
+  <% if (q) { %>
+    <p class="customer-list__hint"><%= customers.length %> match<%= customers.length === 1 ? '' : 'es' %> for "<%= q %>".</p>
+  <% } %>
+
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Mobile</th>
+          <th>Area</th>
+          <th>Route</th>
+          <th>Status</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% if (!customers.length) { %>
+          <tr>
+            <td colspan="6" class="customer-list__empty"><%= q ? 'No customers match your search.' : 'No customers yet.' %></td>
+          </tr>
+        <% } else { %>
+          <% customers.forEach(c=>{ %>
+            <tr>
+              <td><%= c.name %></td>
+              <td><%= c.mobile %></td>
+              <td><%= c.area_name || '—' %></td>
+              <td><%= c.route_name || '—' %></td>
+              <td>
+                <% if (Number(c.active) === 0) { %>
+                  <span class="badge badge--danger">Inactive</span>
+                <% } else { %>
+                  <span class="badge badge--success">Active</span>
+                <% } %>
+              </td>
+              <td><a href="/customer/view/<%= c.id %>">View</a> · <a href="/customer/add?edit=<%= c.id %>">Edit</a> · <a href="/subscription/add/<%= c.id %>">Add subscription</a></td>
+            </tr>
+          <% }) %>
+        <% } %>
+      </tbody>
+    </table>
+  </div>
 </div>
 </body></html>

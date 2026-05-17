@@ -3,38 +3,92 @@
 <body>
 <%- include('_header') %>
 <div class="container">
-  <a href="/customers">Back</a>
+  <a class="back-link" href="/customers">Back</a>
   <h2><%= customer.name %></h2>
   <p>Mobile: <%= customer.mobile %></p>
   <p>Area: <%= customer.area_name %> / Route: <%= customer.route_name %></p>
 
   <h3>Subscriptions</h3>
-  <table>
-    <tr><th>Item</th><th>Monthly</th><th>Annual?</th><th>Sunday-only?</th><th>Period</th><th>Action</th></tr>
-    <% subscriptions.forEach(s=>{ %>
-      <tr>
-        <td><%= s.item_name %></td>
-        <td>₹<%= s.monthly_rate %></td>
-        <td><%= s.is_annual ? 'Yes' : 'No' %></td>
-        <td><%= s.is_sunday_only ? 'Yes' : 'No' %></td>
-        <td><%= s.start_date || '-' %> to <%= s.end_date || '-' %></td>
-        <td><a href="/payment/customer/<%= customer.id %>">Payments</a></td>
-      </tr>
-    <% }) %>
-  </table>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th>Monthly</th>
+          <th>Annual</th>
+          <th>Sunday-only</th>
+          <th>Period</th>
+          <th>Status</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% subscriptions.forEach(s=>{ %>
+          <tr>
+            <td><%= (s.item_name && String(s.item_name).trim()) ? s.item_name : '—' %></td>
+            <td>₹<%= s.monthly_rate %></td>
+            <td>
+              <% if (s.is_annual) { %><span class="badge badge--success">Yes</span><% } else { %><span class="badge badge--neutral">No</span><% } %>
+            </td>
+            <td>
+              <% if (s.is_sunday_only) { %><span class="badge badge--warning">Yes</span><% } else { %><span class="badge badge--neutral">No</span><% } %>
+            </td>
+            <td><%= s.start_date || '—' %> to <%= s.end_date || '—' %></td>
+            <td>
+              <% if (Number(s.active) === 0) { %><span class="badge badge--danger">Stopped</span><% } else { %><span class="badge badge--success">Active</span><% } %>
+            </td>
+            <td class="customer-view__sub-actions">
+              <a href="/payment/customer/<%= customer.id %>">Payments</a>
+              <% if (Number(s.active) !== 0) { %>
+              <a href="/subscription/edit/<%= s.id %>">Edit</a>
+              <form method="post" action="/subscription/stop/<%= s.id %>" class="customer-view__stop-form" onsubmit="return confirm('Remove this subscription? It will be marked stopped as of today. Past payments stay on record.');">
+                <input type="hidden" name="customer_id" value="<%= customer.id %>">
+                <button type="submit" class="customer-view__remove-btn">Remove</button>
+              </form>
+              <% } %>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
 
   <h3>Recent Payments</h3>
-  <table>
-    <tr><th>Month</th><th>Item</th><th>Due</th><th>Paid</th><th>Balance</th></tr>
-    <% payments.forEach(p => { %>
-      <tr>
-        <td><%= p.month %></td>
-        <td><%= p.subscription_id %></td>
-        <td>₹<%= p.amount_due %></td>
-        <td>₹<%= p.amount_paid %></td>
-        <td>₹<%= p.balance %></td>
-      </tr>
-    <% }) %>
-  </table>
+  <p class="customer-view__hint">Billing lines are created automatically for each month from the subscription start through today (same amounts as <strong>Generate Billing</strong>). Use that page if you need to regenerate or change a period.</p>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Month</th>
+          <th>Subscription</th>
+          <th>Due</th>
+          <th>Paid</th>
+          <th>Balance</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% payments.forEach(p => { %>
+          <% const bal = Number(p.balance || 0); const paid = Number(p.amount_paid || 0); %>
+          <tr>
+            <td><%= p.month %></td>
+            <td><%= (p.sub_item_name && String(p.sub_item_name).trim()) ? p.sub_item_name : ('#' + p.subscription_id) %></td>
+            <td>₹<%= p.amount_due %></td>
+            <td>₹<%= p.amount_paid %></td>
+            <td>₹<%= p.balance %></td>
+            <td>
+              <% if (bal <= 0) { %>
+                <span class="badge badge--success">Paid</span>
+              <% } else if (paid > 0) { %>
+                <span class="badge badge--warning">Partial</span>
+              <% } else { %>
+                <span class="badge badge--danger">Due</span>
+              <% } %>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
 </div>
 </body></html>

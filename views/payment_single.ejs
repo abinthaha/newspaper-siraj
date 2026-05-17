@@ -3,7 +3,7 @@
 <body>
 <%- include('_header') %>
 <div class="container">
-  <a href="/payment/customer/<%= payment.customer_id %>">Back</a>
+  <a class="back-link" href="/payment/customer/<%= payment.customer_id %>">Back</a>
   <h2>Payment - <%= payment.item_name %> - <%= payment.month %></h2>
   <p>Due: ₹<%= payment.amount_due %></p>
   <p>Paid so far: ₹<%= payment.amount_paid %></p>

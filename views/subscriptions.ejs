@@ -3,19 +3,39 @@
 <body>
 <%- include('_header') %>
 <div class="container">
-  <a href="/home">Back</a>
+  <a class="back-link" href="/home">Back</a>
   <h2>Subscriptions</h2>
-  <table>
-    <tr><th>Customer</th><th>Item</th><th>Monthly</th><th>Annual</th><th>Sunday-only</th></tr>
-    <% subscriptions.forEach(s => { %>
-      <tr>
-        <td><%= s.customer_name %></td>
-        <td><%= s.item_name %></td>
-        <td>₹<%= s.monthly_rate %></td>
-        <td><%= s.is_annual ? 'Yes' : 'No' %></td>
-        <td><%= s.is_sunday_only ? 'Yes' : 'No' %></td>
-      </tr>
-    <% }) %>
-  </table>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Customer</th>
+          <th>Item</th>
+          <th>Monthly</th>
+          <th>Annual</th>
+          <th>Sunday-only</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% subscriptions.forEach(s => { %>
+          <tr>
+            <td><%= s.customer_name %></td>
+            <td><%= s.item_name %></td>
+            <td>₹<%= s.monthly_rate %></td>
+            <td>
+              <% if (s.is_annual) { %><span class="badge badge--success">Yes</span><% } else { %><span class="badge badge--neutral">No</span><% } %>
+            </td>
+            <td>
+              <% if (s.is_sunday_only) { %><span class="badge badge--warning">Yes</span><% } else { %><span class="badge badge--neutral">No</span><% } %>
+            </td>
+            <td>
+              <% if (Number(s.active) === 0) { %><span class="badge badge--danger">Stopped</span><% } else { %><span class="badge badge--success">Active</span><% } %>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
 </div>
 </body></html>

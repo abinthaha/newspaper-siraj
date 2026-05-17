@@ -2,11 +2,290 @@
 <html><head><meta charset="utf-8"><title>Reports</title><link rel="stylesheet" href="/styles.css"></head>
 <body>
 <%- include('_header') %>
-<div class="container">
-  <a href="/home">Back</a>
+<div class="container container--reports">
+  <a class="back-link" href="/home">Back</a>
   <h2>Reports</h2>
-  <ul>
-    <li><a href="/export/payments?month=<%= (new Date()).getFullYear() + '-' + ('0'+(new Date()).getMonth()+1).slice(-2) %>">Export payments CSV (last month)</a></li>
-  </ul>
+  <p class="reports-lead">Payment trends, balances by product, and exports for accounting.</p>
+
+  <section class="reports-kpi" aria-label="Summary figures">
+    <div class="reports-kpi__card">
+      <span class="reports-kpi__value"><%= kpi.activeCustomers %></span>
+      <span class="reports-kpi__label">Active customers</span>
+    </div>
+    <div class="reports-kpi__card">
+      <span class="reports-kpi__value"><%= kpi.activeSubscriptions %></span>
+      <span class="reports-kpi__label">Active subscriptions</span>
+    </div>
+    <div class="reports-kpi__card">
+      <span class="reports-kpi__value">₹<%= kpi.monthPaid %></span>
+      <span class="reports-kpi__label">Collected (<%= currentMonth %>)</span>
+    </div>
+    <div class="reports-kpi__card reports-kpi__card--accent">
+      <span class="reports-kpi__value">₹<%= kpi.monthBalance %></span>
+      <span class="reports-kpi__label">Outstanding (<%= currentMonth %>)</span>
+    </div>
+  </section>
+
+  <div class="reports-charts">
+    <section class="reports-chart-card reports-chart-card--wide">
+      <h3 class="reports-chart-card__title">Collected vs outstanding by month</h3>
+      <p class="reports-chart-card__sub">Last 12 calendar months (stacked).</p>
+      <div class="reports-chart-canvas-wrap">
+        <canvas id="chartTrend" aria-label="Stacked bar chart of payments by month"></canvas>
+      </div>
+    </section>
+
+    <div class="reports-chart-row">
+      <section class="reports-chart-card">
+        <h3 class="reports-chart-card__title">Outstanding by product</h3>
+        <p class="reports-chart-card__sub">Current month: <%= currentMonth %></p>
+        <p class="reports-chart__empty" id="chartByItemEmpty" hidden>No outstanding balance this month.</p>
+        <div class="reports-chart-canvas-wrap reports-chart-canvas-wrap--compact">
+          <canvas id="chartByItem" aria-label="Doughnut chart of balance by product"></canvas>
+        </div>
+      </section>
+      <section class="reports-chart-card">
+        <h3 class="reports-chart-card__title">Top customers by balance owed</h3>
+        <p class="reports-chart-card__sub">All months, customers with balance &gt; 0.</p>
+        <p class="reports-chart__empty" id="chartDebtorsEmpty" hidden>No balances owed.</p>
+        <div class="reports-chart-canvas-wrap reports-chart-canvas-wrap--compact">
+          <canvas id="chartDebtors" aria-label="Horizontal bar chart of top debtors"></canvas>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <section class="reports-export" aria-labelledby="export-heading">
+    <h3 id="export-heading">Export payment data</h3>
+    <p class="reports-export__intro">Each file lists payment rows (customer, item, amounts). Use <strong>CSV</strong> for spreadsheets or scripts; <strong>XLSX</strong> for Excel.</p>
+
+    <div class="reports-export__grid">
+      <div class="reports-export__panel">
+        <h4>Single month</h4>
+        <label class="reports-export__label" for="export-month">Month</label>
+        <input type="month" id="export-month" class="reports-export__input" value="<%= currentMonth %>">
+        <div class="reports-export__actions">
+          <button type="button" class="reports-export__btn" id="btn-csv-month">Download CSV</button>
+          <button type="button" class="reports-export__btn reports-export__btn--primary" id="btn-xlsx-month">Download XLSX</button>
+        </div>
+      </div>
+      <div class="reports-export__panel">
+        <h4>Custom range</h4>
+        <label class="reports-export__label" for="export-from">From</label>
+        <input type="month" id="export-from" class="reports-export__input" value="<%= exportOldest %>">
+        <label class="reports-export__label" for="export-to">To</label>
+        <input type="month" id="export-to" class="reports-export__input" value="<%= currentMonth %>">
+        <div class="reports-export__actions">
+          <button type="button" class="reports-export__btn" id="btn-csv-range">Download CSV</button>
+          <button type="button" class="reports-export__btn reports-export__btn--primary" id="btn-xlsx-range">Download XLSX</button>
+        </div>
+      </div>
+      <div class="reports-export__panel reports-export__panel--quick">
+        <h4>Quick downloads</h4>
+        <ul class="reports-export__links">
+          <li><a href="/export/payments?month=<%= currentMonth %>&amp;format=csv">CSV — <%= currentMonth %></a></li>
+          <li><a href="/export/payments?month=<%= currentMonth %>&amp;format=xlsx">XLSX — <%= currentMonth %></a></li>
+          <li><a href="/export/payments?from=<%= exportOldest %>&amp;to=<%= currentMonth %>&amp;format=csv">CSV — last 12 months</a></li>
+          <li><a href="/export/payments?from=<%= exportOldest %>&amp;to=<%= currentMonth %>&amp;format=xlsx">XLSX — last 12 months</a></li>
+        </ul>
+      </div>
+    </div>
+  </section>
 </div>
+
+<script type="application/json" id="reports-chart-data"><%- chartPayloadJson %></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+<script>
+(function () {
+  var el = document.getElementById('reports-chart-data');
+  if (!el || typeof Chart === 'undefined') return;
+  var payload;
+  try {
+    payload = JSON.parse(el.textContent);
+  } catch (e) {
+    return;
+  }
+
+  function rupeeTick(val) {
+    if (val >= 1e7) return '₹' + (val / 1e7).toFixed(1) + 'Cr';
+    if (val >= 1e5) return '₹' + (val / 1e5).toFixed(1) + 'L';
+    if (val >= 1e3) return '₹' + (val / 1e3).toFixed(1) + 'k';
+    return '₹' + val;
+  }
+
+  function shortMonthLabel(ym) {
+    var p = String(ym).split('-');
+    var y = parseInt(p[0], 10);
+    var m = parseInt(p[1], 10);
+    if (!y || !m) return ym;
+    var d = new Date(y, m - 1, 1);
+    return d.toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+  }
+
+  var trendLabels = payload.trend.map(function (t) { return shortMonthLabel(t.month); });
+  new Chart(document.getElementById('chartTrend'), {
+    type: 'bar',
+    data: {
+      labels: trendLabels,
+      datasets: [
+        {
+          label: 'Collected',
+          data: payload.trend.map(function (t) { return t.amount_paid; }),
+          backgroundColor: 'rgba(34, 197, 94, 0.78)',
+          borderRadius: 4,
+          stack: 's'
+        },
+        {
+          label: 'Outstanding',
+          data: payload.trend.map(function (t) { return t.balance; }),
+          backgroundColor: 'rgba(251, 146, 60, 0.88)',
+          borderRadius: 4,
+          stack: 's'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { stacked: true, grid: { display: false } },
+        y: {
+          stacked: true,
+          beginAtZero: true,
+          ticks: { callback: rupeeTick },
+          grid: { color: 'rgba(148, 163, 184, 0.25)' }
+        }
+      },
+      plugins: {
+        legend: { labels: { boxWidth: 12, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: function (ctx) {
+              return ctx.dataset.label + ': ₹' + Number(ctx.raw || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
+            }
+          }
+        }
+      }
+    }
+  });
+
+  function topSlicesWithOther(items, maxN) {
+    var pos = (items || []).filter(function (x) { return x.value > 0; });
+    if (!pos.length) return [];
+    if (pos.length <= maxN) return pos;
+    var head = pos.slice(0, maxN);
+    var other = pos.slice(maxN).reduce(function (s, x) { return s + x.value; }, 0);
+    if (other > 0) head.push({ label: 'Other', value: other });
+    return head;
+  }
+
+  var byItemSlices = topSlicesWithOther(payload.byItem, 7);
+  var byItemCanvas = document.getElementById('chartByItem');
+  if (!byItemSlices.length) {
+    document.getElementById('chartByItemEmpty').hidden = false;
+    byItemCanvas.style.display = 'none';
+  } else {
+    new Chart(byItemCanvas, {
+      type: 'doughnut',
+      data: {
+        labels: byItemSlices.map(function (x) { return x.label; }),
+        datasets: [{
+          data: byItemSlices.map(function (x) { return x.value; }),
+          backgroundColor: [
+            'rgba(59, 130, 246, 0.85)',
+            'rgba(16, 185, 129, 0.85)',
+            'rgba(245, 158, 11, 0.9)',
+            'rgba(139, 92, 246, 0.85)',
+            'rgba(236, 72, 153, 0.85)',
+            'rgba(14, 165, 233, 0.85)',
+            'rgba(100, 116, 139, 0.85)',
+            'rgba(71, 85, 105, 0.75)'
+          ]
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '58%',
+        plugins: {
+          legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 10 } } },
+          tooltip: {
+            callbacks: {
+              label: function (ctx) {
+                var v = Number(ctx.raw || 0);
+                var sum = ctx.dataset.data.reduce(function (a, b) { return a + b; }, 0);
+                var pct = sum ? Math.round((100 * v) / sum) : 0;
+                return '₹' + v.toLocaleString(undefined, { maximumFractionDigits: 0 }) + ' (' + pct + '%)';
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  var debtors = payload.topDebtors || [];
+  var debtCanvas = document.getElementById('chartDebtors');
+  if (!debtors.length) {
+    document.getElementById('chartDebtorsEmpty').hidden = false;
+    debtCanvas.style.display = 'none';
+  } else {
+    new Chart(debtCanvas, {
+      type: 'bar',
+      data: {
+        labels: debtors.map(function (d) { return d.label; }),
+        datasets: [{
+          label: 'Balance',
+          data: debtors.map(function (d) { return d.value; }),
+          backgroundColor: 'rgba(59, 130, 246, 0.72)',
+          borderRadius: 4
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        indexAxis: 'y',
+        scales: {
+          x: { beginAtZero: true, ticks: { callback: rupeeTick }, grid: { color: 'rgba(148, 163, 184, 0.25)' } },
+          y: { grid: { display: false } }
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: function (ctx) {
+                return '₹' + Number(ctx.raw || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function goExport(params) {
+    var q = Object.keys(params).map(function (k) {
+      return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
+    }).join('&');
+    window.location.href = '/export/payments?' + q;
+  }
+
+  var mInput = document.getElementById('export-month');
+  var fromInput = document.getElementById('export-from');
+  var toInput = document.getElementById('export-to');
+
+  document.getElementById('btn-csv-month').addEventListener('click', function () {
+    goExport({ month: mInput.value, format: 'csv' });
+  });
+  document.getElementById('btn-xlsx-month').addEventListener('click', function () {
+    goExport({ month: mInput.value, format: 'xlsx' });
+  });
+  document.getElementById('btn-csv-range').addEventListener('click', function () {
+    goExport({ from: fromInput.value, to: toInput.value, format: 'csv' });
+  });
+  document.getElementById('btn-xlsx-range').addEventListener('click', function () {
+    goExport({ from: fromInput.value, to: toInput.value, format: 'xlsx' });
+  });
+})();
+</script>
 </body></html>

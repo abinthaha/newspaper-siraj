@@ -1,24 +1,51 @@
+<% const aid = (typeof activeItemIds !== 'undefined' && activeItemIds) ? activeItemIds : []; %>
+<% const items = locals.items || []; %>
+<% const allItemsSubscribed = items.length > 0 && items.every(function (it) { return aid.some(function (x) { return Number(x) === Number(it.id); }); }); %>
 <!doctype html>
 <html><head><meta charset="utf-8"><title>Add Subscription</title><link rel="stylesheet" href="/styles.css"></head>
 <body>
 <%- include('_header') %>
 <div class="container">
-  <a href="/customer/view/<%= customer.id %>">Back</a>
+  <a class="back-link" href="/customer/view/<%= customer.id %>">Back</a>
   <h2>Add Subscription for <%= customer.name %></h2>
   <form method="POST" action="/subscription/add">
     <input type="hidden" name="customer_id" value="<%= customer.id %>">
-    <label>Select Item</label>
-    <select name="item_id">
-      <% items.forEach(it => { %>
-        <option value="<%= it.id %>"><%= it.name %> - ₹<%= it.monthly_rate %> / month</option>
-      <% }) %>
-    </select>
-    <label>Monthly Rate (override)</label><input name="monthly_rate" type="number" placeholder="Leave blank to use item rate">
+    <fieldset class="form-fieldset subscription-pick">
+      <legend class="form-fieldset__legend">Select publications (one or more)</legend>
+      <p class="form-hint subscription-pick__hint">Publications you already have are checked and greyed out. Tick additional papers to add them. For each new paper, the monthly rate defaults to the catalog price — change it if needed.</p>
+      <% if (!items.length) { %>
+        <p class="subscription-pick__empty">No active items available. Add items under <a href="/items">Items</a> first.</p>
+      <% } else { %>
+        <div class="subscription-pick__list">
+          <% items.forEach(function (it) { %>
+            <% const has = aid.some(function (x) { return Number(x) === Number(it.id); }); %>
+            <% const cat = (it.monthly_rate != null && it.monthly_rate !== '') ? it.monthly_rate : 295; %>
+            <div class="subscription-pick__row<%= has ? ' subscription-pick__row--current' : '' %>">
+              <label class="subscription-pick__row-label">
+                <input type="checkbox" name="item_ids" value="<%= it.id %>"<%= has ? ' checked disabled' : '' %>>
+                <span><%= it.name %> — ₹<%= it.monthly_rate %>/month<% if (has) { %> <span class="subscription-pick__badge">Current</span><% } %></span>
+              </label>
+              <% if (!has) { %>
+              <div class="subscription-pick__rate-field">
+                <label for="item-rate-<%= it.id %>" class="subscription-pick__rate-caption">Monthly (₹)</label>
+                <input id="item-rate-<%= it.id %>" class="subscription-pick__rate-input" type="number" name="item_rates[<%= it.id %>]" min="0" step="any" value="<%= cat %>">
+              </div>
+              <% } %>
+            </div>
+          <% }); %>
+        </div>
+      <% } %>
+    </fieldset>
     <label><input type="checkbox" name="is_annual" value="1"> Annual (prepaid) subscription - NO monthly billing</label>
     <label><input type="checkbox" name="is_sunday_only" value="1"> Sunday-only (₹10 per Sunday)</label>
-    <label>Start date</label><input name="start_date" type="date">
-    <label>End date (optional)</label><input name="end_date" type="date">
-    <button type="submit">Add Subscription</button>
+    <label>Start date <span class="form-required">*</span></label>
+    <input name="start_date" type="date" required>
+    <label>End date (optional)</label>
+    <input name="end_date" type="date">
+    <button type="submit" <%= (!items.length || allItemsSubscribed) ? 'disabled' : '' %>>Add subscription(s)</button>
+    <% if (allItemsSubscribed) { %>
+      <p class="form-hint subscription-pick__footer">This customer already has every listed publication. Add more items under Items, or remove a subscription from the customer page to change papers.</p>
+    <% } %>
   </form>
 </div>
 </body></html>
